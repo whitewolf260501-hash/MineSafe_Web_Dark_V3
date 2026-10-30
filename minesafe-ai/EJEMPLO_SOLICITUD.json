@@ -1,0 +1,11 @@
+{
+  "device_id": "NODO_U-01",
+  "observations": [
+    {"timestamp": "2026-10-29T12:00:00Z", "pm25_raw": 450, "mq2_raw": 200, "temperature_c": 22.1, "humidity_pct": 48, "unit": "raw"},
+    {"timestamp": "2026-10-29T12:00:05Z", "pm25_raw": 452, "mq2_raw": 202, "temperature_c": 22.2, "humidity_pct": 48.5, "unit": "raw"},
+    {"timestamp": "2026-10-29T12:00:10Z", "pm25_raw": 455, "mq2_raw": 201, "temperature_c": 22.2, "humidity_pct": 49, "unit": "raw"},
+    {"timestamp": "2026-10-29T12:00:15Z", "pm25_raw": 453, "mq2_raw": 204, "temperature_c": 22.3, "humidity_pct": 49.2, "unit": "raw"},
+    {"timestamp": "2026-10-29T12:00:20Z", "pm25_raw": 900, "mq2_raw": 205, "temperature_c": 22.4, "humidity_pct": 49.5, "unit": "raw"},
+    {"timestamp": "2026-10-29T12:00:25Z", "pm25_raw": 454, "mq2_raw": 203, "temperature_c": 22.4, "humidity_pct": 49.4, "unit": "raw"}
+  ]
+}

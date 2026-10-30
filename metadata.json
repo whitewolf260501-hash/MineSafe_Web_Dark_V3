@@ -1,0 +1,6 @@
+{
+  "name": "MineSafe - Sistema IoT de Monitoreo y Seguridad Minera",
+  "description": "Plataforma industrial IoT para monitoreo ambiental subterráneo, control de sensores, alertas críticas en faenas mineras y prevención de riesgos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

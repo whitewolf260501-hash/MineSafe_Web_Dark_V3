@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#2563eb" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#bg)" />
+  <rect x="32" y="32" width="448" height="448" rx="96" fill="none" stroke="#06b6d4" stroke-width="8" stroke-opacity="0.3" />
+  <!-- Radio Wave Signals -->
+  <path d="M 176 256 A 80 80 0 0 1 336 256" fill="none" stroke="#06b6d4" stroke-width="24" stroke-linecap="round" />
+  <path d="M 128 256 A 128 128 0 0 1 384 256" fill="none" stroke="#38bdf8" stroke-width="24" stroke-linecap="round" stroke-opacity="0.7" />
+  <path d="M 80 256 A 176 176 0 0 1 432 256" fill="none" stroke="#67e8f9" stroke-width="24" stroke-linecap="round" stroke-opacity="0.4" />
+  <!-- Central Sensor Core -->
+  <circle cx="256" cy="256" r="48" fill="url(#cyanGrad)" />
+  <circle cx="256" cy="256" r="24" fill="#ffffff" />
+  <!-- Bottom Industrial Badge -->
+  <rect x="156" y="380" width="200" height="44" rx="22" fill="#0369a1" />
+  <text x="256" y="408" font-family="system-ui, sans-serif" font-size="20" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="4">MINESAFE</text>
+</svg>

@@ -1,0 +1,13 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+public/*.zip
+minesafe-ai/.venv/
+minesafe-ai/__pycache__/
+minesafe-ai/.pytest_cache/
+

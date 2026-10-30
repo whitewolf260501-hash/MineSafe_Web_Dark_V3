@@ -1,0 +1,20 @@
+{
+  "name": "MineSafe IoT - Seguridad Minera DS 132",
+  "short_name": "MineSafe IoT",
+  "description": "Sistema industrial IoT de monitoreo ambiental subterráneo, detección de gases y seguridad minera DS 132.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#060b13",
+  "theme_color": "#060b13",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "utilities", "productivity"]
+}

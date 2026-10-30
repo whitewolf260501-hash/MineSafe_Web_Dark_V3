@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "user": {
+      "title": "UserProfile",
+      "description": "MineSafe registered user profile with role and assignment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["superadmin", "admin", "operador"] },
+        "roleLabel": { "type": "string" },
+        "rut": { "type": "string" },
+        "shift": { "type": "string" },
+        "status": { "type": "string", "enum": ["activo", "inactivo"] },
+        "lastLogin": { "type": "string" },
+        "assignedSector": { "type": "string" },
+        "assignedDeviceCode": { "type": "string" }
+      },
+      "required": ["name", "email", "role"]
+    },
+    "device": {
+      "title": "SensorDevice",
+      "description": "IoT sensor device telemetry in mine sector",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "sectorId": { "type": "string" },
+        "sectorName": { "type": "string" },
+        "batteryPct": { "type": "number" },
+        "signalStrength": { "type": "string" },
+        "lastPing": { "type": "string" },
+        "status": { "type": "string", "enum": ["normal", "advertencia", "critico", "desconectado"] },
+        "assignedTo": { "type": "string" },
+        "metrics": { "type": "object" }
+      },
+      "required": ["code", "name", "status"]
+    },
+    "alert": {
+      "title": "SafetyAlert",
+      "description": "Mine safety and atmospheric contingency alert",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "title": { "type": "string" },
+        "severity": { "type": "string", "enum": ["normal", "advertencia", "critico", "desconectado"] },
+        "variableName": { "type": "string" },
+        "sensorId": { "type": "string" },
+        "sensorCode": { "type": "string" },
+        "sectorName": { "type": "string" },
+        "recordedValue": { "type": "string" },
+        "safeLimit": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "acknowledged": { "type": "boolean" },
+        "acknowledgedBy": { "type": "string" },
+        "resolved": { "type": "boolean" },
+        "suggestedAction": { "type": "string" }
+      },
+      "required": ["code", "title", "severity"]
+    },
+    "rental": {
+      "title": "DeviceRental",
+      "description": "IoT equipment rental contract and payment status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "contractNumber": { "type": "string" },
+        "deviceCode": { "type": "string" },
+        "deviceType": { "type": "string" },
+        "provider": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "monthlyCostClp": { "type": "number" },
+        "paymentStatus": { "type": "string" },
+        "lastPaymentDate": { "type": "string" },
+        "nextDueDate": { "type": "string" },
+        "assignedTechnician": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["contractNumber", "deviceCode", "provider"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "#/entities/user",
+      "description": "Registered MineSafe users"
+    },
+    "/devices/{deviceId}": {
+      "schema": "#/entities/device",
+      "description": "IoT sensors and live measurements"
+    },
+    "/alerts/{alertId}": {
+      "schema": "#/entities/alert",
+      "description": "Safety contingency alerts"
+    },
+    "/rentals/{rentalId}": {
+      "schema": "#/entities/rental",
+      "description": "Equipment rental contracts"
+    }
+  }
+}

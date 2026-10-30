@@ -1,0 +1,52 @@
+{
+  "rules": {
+    "dispositivos": {
+      ".read": true,
+      "$deviceId": {
+        // En producción se restringe la escritura al gateway autenticado o usuario autorizado
+        ".write": "auth != null || newData.hasChildren(['last_update_server'])",
+        ".validate": "newData.hasChildren(['CO', 'PM2_5', 'temperatura', 'humedad'])",
+        "CO": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4095"
+        },
+        "PM2_5": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4095"
+        },
+        "temperatura": {
+          ".validate": "newData.isNumber() && newData.val() >= -40 && newData.val() <= 100"
+        },
+        "humedad": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+        },
+        "last_update_server": {
+          ".validate": "newData.isNumber()"
+        }
+      }
+    },
+    "usuarios": {
+      // Solo usuarios autenticados pueden consultar perfiles de la faena
+      ".read": true,
+      "$userId": {
+        ".write": "auth != null && (auth.uid === $userId || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true)"
+      }
+    },
+    "contratos": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('usuarios/' + auth.uid + '/isAdmin').val() === true"
+    },
+    "alertas": {
+      ".read": true,
+      "$alertId": {
+        ".write": true
+      }
+    },
+    "simulacro": {
+      ".read": true,
+      ".write": true
+    },
+    "emergencia": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}
