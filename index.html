@@ -22,7 +22,19 @@
   </head>
   <body class="bg-slate-950 text-slate-100 antialiased selection:bg-cyan-500 selection:text-white min-h-screen">
     <div id="root"></div>
-    <script type="module" src="./src/main.tsx"></script>
+    <script type="module">
+      const isGitHubPages = window.location.hostname.includes('github.io');
+      if (isGitHubPages) {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.crossOrigin = '';
+        link.href = './assets/index-C58PfplE.css';
+        document.head.appendChild(link);
+        import('./assets/index-Ch16f2qP.js').catch(console.error);
+      } else {
+        import('./src/main.tsx').catch(console.error);
+      }
+    </script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
