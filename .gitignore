@@ -7,7 +7,9 @@ coverage/
 .env*
 !.env.example
 public/*.zip
+.aistudio/
 minesafe-ai/.venv/
 minesafe-ai/__pycache__/
 minesafe-ai/.pytest_cache/
+
 
