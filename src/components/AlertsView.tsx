@@ -17,7 +17,8 @@ import {
   CheckCircle2,
   Flame,
   Cpu,
-  Wrench
+  Wrench,
+  ShieldCheck
 } from 'lucide-react';
 import { SafetyAlert, AlertSeverity, NavigationTab, AlertResolutionDetails, UserProfile } from '../types';
 import { soundAlert } from '../services/audioAlert';

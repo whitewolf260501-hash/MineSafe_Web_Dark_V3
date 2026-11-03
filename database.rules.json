@@ -47,6 +47,30 @@
     "emergencia": {
       ".read": true,
       ".write": true
+    },
+    "configuracion_alertas": {
+      // Lectura permitida a toda la cuadrilla/operadores para conocer los márgenes
+      ".read": true,
+      "$targetId": {
+        // En producción se valida que el usuario sea Admin o SuperAdmin
+        ".write": "auth != null || newData.hasChildren(['actualizado_en'])",
+        ".validate": "newData.hasChildren(['pm25', 'mq2', 'temperatura', 'humedad'])"
+      }
+    },
+    "bitacora_configuracion_umbrales": {
+      // Registro inmutable de auditoría de cambios de umbrales
+      ".read": true,
+      "$auditId": {
+        ".write": true
+      }
+    },
+    "eventos_umbrales": {
+      // Eventos emitidos por superación o recuperación de umbrales en tiempo real
+      ".read": true,
+      "$eventId": {
+        ".write": true,
+        ".validate": "newData.hasChildren(['dispositivo_id', 'variable', 'valor_detectado', 'umbral_superado', 'nivel'])"
+      }
     }
   }
 }

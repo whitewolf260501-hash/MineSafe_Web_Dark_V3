@@ -29,23 +29,6 @@ export default defineConfig(({ command }) => {
       },
     },
     server: {
-      // Proxy seguro para MineSafe AI Analysis API (FastAPI)
-      // Permite a la web consultar /api/ai/* sin exponer la clave privada en el cliente
-      proxy: {
-        '/api/ai': {
-          target: process.env.MINESAFE_AI_URL || 'http://127.0.0.1:8000',
-          changeOrigin: true,
-          rewrite: (p) => p.replace(/^\/api\/ai/, ''),
-          configure: (proxy) => {
-            proxy.on('proxyReq', (proxyReq) => {
-              const apiKey = process.env.MINESAFE_AI_API_KEY;
-              if (apiKey && !proxyReq.getHeader('authorization')) {
-                proxyReq.setHeader('Authorization', `Bearer ${apiKey}`);
-              }
-            });
-          },
-        },
-      },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

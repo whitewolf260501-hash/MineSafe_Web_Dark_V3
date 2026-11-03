@@ -15,7 +15,8 @@ import {
   CloudRain,
   Wind,
   Flame,
-  Zap
+  Zap,
+  Info
 } from 'lucide-react';
 import { TelemetryVariable, MiningSite } from '../types';
 import { soundAlert } from '../services/audioAlert';

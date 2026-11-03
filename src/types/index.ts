@@ -178,19 +178,54 @@ export type NavigationTab =
   | 'dashboard'
   | 'monitoreo'
   | 'alertas'
-  | 'ia'
+  | 'configuracion_alertas'
   | 'equipos'
   | 'reportes'
   | 'faenas'
   | 'usuarios';
 
-export type {
-  Observation,
-  AnalyzeRequest,
-  AnalyzeResponse,
-  MetricTrend,
-  Anomaly,
-  TrendDirection,
-  HealthResponse
-} from '../services/aiService';
+export type AlertThresholdLevel = 'normal' | 'preventivo' | 'advertencia' | 'critico';
+
+export interface ThresholdVariableConfig {
+  activo: boolean;
+  notificaciones: boolean;
+  preventivo: number;
+  advertencia: number;
+  critico: number;
+  unidad: string;
+  minVal: number;
+  maxVal: number;
+  label: string;
+  descripcion?: string;
+}
+
+export interface DeviceThresholdsConfig {
+  dispositivo_id: string; // 'global' o ID específico (ej: 'device_38A839E81F84')
+  dispositivo_nombre?: string;
+  pm25: ThresholdVariableConfig;
+  mq2: ThresholdVariableConfig;
+  temperatura: ThresholdVariableConfig;
+  humedad: ThresholdVariableConfig;
+  actualizado_en: number;
+  actualizado_por: string;
+  notas?: string;
+}
+
+export interface AlertEventRecord {
+  id: string;
+  dispositivo_id: string;
+  dispositivo_nombre: string;
+  sector_nombre: string;
+  variable: 'pm25' | 'mq2' | 'temperatura' | 'humedad';
+  variable_label: string;
+  valor_detectado: number;
+  umbral_superado: number;
+  nivel: 'preventivo' | 'advertencia' | 'critico';
+  unidad: string;
+  timestamp: number;
+  fecha_hora: string;
+  estado: 'activa' | 'recuperada';
+  recuperada_en?: number;
+  origen: 'motor_umbrales';
+}
 

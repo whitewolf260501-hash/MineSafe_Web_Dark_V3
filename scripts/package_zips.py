@@ -22,27 +22,18 @@ if __name__ == "__main__":
     base_dir = "/app/applet"
     public_dir = os.path.join(base_dir, "public")
     
-    # 1. Empaquetar MineSafe Web Modificado
-    web_zip = os.path.join(public_dir, "minesafe-web-ia.zip")
+    # 1. Empaquetar MineSafe Web
+    web_zip = os.path.join(public_dir, "minesafe-web.zip")
+    web_zip_compat = os.path.join(public_dir, "minesafe-web-ia.zip")
     print(f"Empaquetando proyecto Web en {web_zip}...")
     create_zip(
         source_dir=base_dir,
         output_zip_path=web_zip,
         exclude_dirs={"node_modules", "dist", ".git", ".pytest_cache", "minesafe-ai", "__pycache__"},
-        exclude_files={"minesafe-web-ia.zip", "minesafe-ai-actualizado.zip"},
+        exclude_files={"minesafe-web.zip", "minesafe-web-ia.zip", "minesafe-ai-actualizado.zip"},
         prefix_strip=base_dir
     )
+    import shutil
+    shutil.copyfile(web_zip, web_zip_compat)
     print(f"Web ZIP creado con tamaño: {os.path.getsize(web_zip)} bytes")
 
-    # 2. Empaquetar MineSafe AI Backend Actualizado
-    ai_dir = os.path.join(base_dir, "minesafe-ai")
-    ai_zip = os.path.join(public_dir, "minesafe-ai-actualizado.zip")
-    print(f"Empaquetando backend IA en {ai_zip}...")
-    create_zip(
-        source_dir=ai_dir,
-        output_zip_path=ai_zip,
-        exclude_dirs={".pytest_cache", "__pycache__", ".venv", "venv"},
-        exclude_files={},
-        prefix_strip=ai_dir
-    )
-    print(f"IA ZIP creado con tamaño: {os.path.getsize(ai_zip)} bytes")

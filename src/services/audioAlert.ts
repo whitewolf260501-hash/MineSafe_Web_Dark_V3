@@ -62,6 +62,42 @@ class SoundAlertService {
     }
   }
 
+  // Warning chime for moderate thresholds
+  public playWarningAlert(): void {
+    if (this.isMuted) return;
+    try {
+      const ctx = this.getContext();
+      if (!ctx) return;
+
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(650, now);
+      osc.frequency.exponentialRampToValueAtTime(480, now + 0.25);
+
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } catch {
+      // Audio autoplay policy fallback
+    }
+  }
+
+  public playAlert(severity: 'critico' | 'advertencia'): void {
+    if (severity === 'critico') {
+      this.playCriticalAlert();
+    } else {
+      this.playWarningAlert();
+    }
+  }
+
   // Continuous pulsating siren for manual or critical alarm
   public startContinuousAlarm(): void {
     if (this.isContinuousAlarmRunning) return;

@@ -22,7 +22,10 @@ import {
   UserRole,
   SafetyAlert,
   AlertResolutionDetails,
-  DrillDebriefRecord
+  DrillDebriefRecord,
+  DeviceThresholdsConfig,
+  ThresholdVariableConfig,
+  AlertEventRecord
 } from '../types';
 
 export const USER_RTDB_URL = "https://minefase-fc5f5-default-rtdb.firebaseio.com/";
@@ -797,6 +800,297 @@ export async function saveDrillDebriefInRTDB(record: DrillDebriefRecord): Promis
     console.warn('Error saving drill debrief to RTDB:', err);
   }
 }
+
+/**
+ * ============================================================================
+ * CONFIGURACIÓN DINÁMICA DE UMBRALES DE ALERTA (RTDB)
+ * ============================================================================
+ */
+
+export const DEFAULT_GLOBAL_THRESHOLDS: DeviceThresholdsConfig = {
+  dispositivo_id: 'global',
+  dispositivo_nombre: 'Configuración Global (Todos los Sensores por Defecto)',
+  pm25: {
+    activo: true,
+    notificaciones: true,
+    preventivo: 350,
+    advertencia: 750,
+    critico: 1200,
+    unidad: 'ADC raw',
+    minVal: 0,
+    maxVal: 4095,
+    label: 'Partículas PM2.5 (Sensor Óptico ADC)',
+    descripcion: 'Lectura analógica bruta de 12 bits (0-4095) del ESP32. Valores de ejemplo referenciales sin calibración gravimétrica oficial.'
+  },
+  mq2: {
+    activo: true,
+    notificaciones: true,
+    preventivo: 300,
+    advertencia: 800,
+    critico: 1200,
+    unidad: 'ADC raw',
+    minVal: 0,
+    maxVal: 4095,
+    label: 'Gases Combustibles y Humos (MQ-2 ADC)',
+    descripcion: 'Lectura analógica bruta de 12 bits (0-4095). Valores de ejemplo referenciales; no representan PPM certificados sin calibración con gas patrón.'
+  },
+  temperatura: {
+    activo: true,
+    notificaciones: true,
+    preventivo: 26,
+    advertencia: 32,
+    critico: 38,
+    unidad: '°C',
+    minVal: -20,
+    maxVal: 80,
+    label: 'Temperatura Ambiental (DHT)',
+    descripcion: 'Monitoreo térmico en galerías subterráneas y frentes de avance. Valores de ejemplo según protocolo de estrés térmico.'
+  },
+  humedad: {
+    activo: true,
+    notificaciones: true,
+    preventivo: 70,
+    advertencia: 80,
+    critico: 90,
+    unidad: '%',
+    minVal: 0,
+    maxVal: 100,
+    label: 'Humedad Relativa (DHT)',
+    descripcion: 'Humedad relativa ambiental. Valores de ejemplo referenciales para control de ventilación y saturación ambiental.'
+  },
+  actualizado_en: Date.now(),
+  actualizado_por: 'Sistema MineSafe (Valores Iniciales)',
+  notas: 'Límites iniciales configurables de ejemplo. Modificar según protocolos de seguridad de la faena.'
+};
+
+/**
+ * Escucha la configuración de umbrales para un dispositivo específico o 'global'
+ */
+export function subscribeToAlertThresholds(
+  targetId: string, 
+  callback: (config: DeviceThresholdsConfig) => void
+): () => void {
+  const path = `configuracion_alertas/${targetId}`;
+  const configRef = ref(rtdb, path);
+
+  return onValue(configRef, (snapshot) => {
+    if (snapshot.exists()) {
+      const data = snapshot.val();
+      callback({
+        dispositivo_id: targetId,
+        dispositivo_nombre: data.dispositivo_nombre || targetId,
+        pm25: { ...DEFAULT_GLOBAL_THRESHOLDS.pm25, ...(data.pm25 || {}) },
+        mq2: { ...DEFAULT_GLOBAL_THRESHOLDS.mq2, ...(data.mq2 || {}) },
+        temperatura: { ...DEFAULT_GLOBAL_THRESHOLDS.temperatura, ...(data.temperatura || {}) },
+        humedad: { ...DEFAULT_GLOBAL_THRESHOLDS.humedad, ...(data.humedad || {}) },
+        actualizado_en: data.actualizado_en || Date.now(),
+        actualizado_por: data.actualizado_por || 'Desconocido',
+        notas: data.notas || ''
+      });
+    } else {
+      callback({
+        ...DEFAULT_GLOBAL_THRESHOLDS,
+        dispositivo_id: targetId,
+        dispositivo_nombre: targetId === 'global' ? DEFAULT_GLOBAL_THRESHOLDS.dispositivo_nombre : `Dispositivo ${targetId}`
+      });
+    }
+  }, (err) => {
+    console.warn(`Error subscribing to thresholds for ${targetId}:`, err);
+    callback({
+      ...DEFAULT_GLOBAL_THRESHOLDS,
+      dispositivo_id: targetId
+    });
+  });
+}
+
+/**
+ * Escucha todas las configuraciones de umbrales existentes en la base de datos
+ */
+export function subscribeToAllThresholdConfigs(
+  callback: (configs: Record<string, DeviceThresholdsConfig>) => void
+): () => void {
+  const configsRef = ref(rtdb, 'configuracion_alertas');
+
+  return onValue(configsRef, (snapshot) => {
+    const result: Record<string, DeviceThresholdsConfig> = {};
+    if (snapshot.exists()) {
+      const data = snapshot.val();
+      Object.keys(data).forEach((key) => {
+        const item = data[key];
+        result[key] = {
+          dispositivo_id: key,
+          dispositivo_nombre: item.dispositivo_nombre || key,
+          pm25: { ...DEFAULT_GLOBAL_THRESHOLDS.pm25, ...(item.pm25 || {}) },
+          mq2: { ...DEFAULT_GLOBAL_THRESHOLDS.mq2, ...(item.mq2 || {}) },
+          temperatura: { ...DEFAULT_GLOBAL_THRESHOLDS.temperatura, ...(item.temperatura || {}) },
+          humedad: { ...DEFAULT_GLOBAL_THRESHOLDS.humedad, ...(item.humedad || {}) },
+          actualizado_en: item.actualizado_en || Date.now(),
+          actualizado_por: item.actualizado_por || 'Desconocido',
+          notas: item.notas || ''
+        };
+      });
+    }
+    if (!result['global']) {
+      result['global'] = { ...DEFAULT_GLOBAL_THRESHOLDS };
+    }
+    callback(result);
+  }, (err) => {
+    console.warn('Error subscribing to all threshold configs:', err);
+    callback({ global: DEFAULT_GLOBAL_THRESHOLDS });
+  });
+}
+
+/**
+ * Guarda o actualiza los umbrales de alerta en Firebase RTDB
+ * Valida que el usuario tenga rol de administrador o superadmin
+ */
+export async function saveThresholdConfig(
+  targetId: string, 
+  config: DeviceThresholdsConfig, 
+  user: UserProfile
+): Promise<void> {
+  if (user.role !== 'admin' && user.role !== 'superadmin') {
+    throw new Error('Permisos insuficientes: Solo los usuarios con rol Administrador o SuperAdmin pueden modificar los umbrales de seguridad operacional.');
+  }
+
+  // Validación de consistencia matemática: preventivo < advertencia < critico
+  const variables: ('pm25' | 'mq2' | 'temperatura' | 'humedad')[] = ['pm25', 'mq2', 'temperatura', 'humedad'];
+  for (const v of variables) {
+    const cfg = config[v];
+    if (cfg.activo) {
+      if (cfg.preventivo >= cfg.advertencia) {
+        throw new Error(`En la variable ${cfg.label}: El umbral preventivo (${cfg.preventivo}) debe ser menor que el umbral de advertencia (${cfg.advertencia}).`);
+      }
+      if (cfg.advertencia >= cfg.critico) {
+        throw new Error(`En la variable ${cfg.label}: El umbral de advertencia (${cfg.advertencia}) debe ser menor que el umbral crítico (${cfg.critico}).`);
+      }
+    }
+  }
+
+  const payload: DeviceThresholdsConfig = {
+    ...config,
+    dispositivo_id: targetId,
+    actualizado_en: Date.now(),
+    actualizado_por: user.name ? `${user.name} (${user.role})` : user.email,
+  };
+
+  const targetRef = ref(rtdb, `configuracion_alertas/${targetId}`);
+  await set(targetRef, payload);
+
+  // Registro de auditoría inmutable en la bitácora de configuraciones
+  const auditKey = `${targetId}_${Date.now()}`;
+  const auditRef = ref(rtdb, `bitacora_configuracion_umbrales/${auditKey}`);
+  await set(auditRef, {
+    targetId,
+    configGuardada: payload,
+    modificadoPor: payload.actualizado_por,
+    timestamp: Date.now(),
+    fecha: new Date().toISOString()
+  }).catch((err) => console.warn('Error saving audit log:', err));
+}
+
+/**
+ * Restaura los valores de umbrales a los predeterminados de fábrica
+ */
+export async function resetThresholdConfigToDefault(
+  targetId: string, 
+  user: UserProfile
+): Promise<DeviceThresholdsConfig> {
+  if (user.role !== 'admin' && user.role !== 'superadmin') {
+    throw new Error('Permisos insuficientes: Solo los administradores pueden restaurar valores de seguridad.');
+  }
+
+  const restoredConfig: DeviceThresholdsConfig = {
+    ...DEFAULT_GLOBAL_THRESHOLDS,
+    dispositivo_id: targetId,
+    dispositivo_nombre: targetId === 'global' ? DEFAULT_GLOBAL_THRESHOLDS.dispositivo_nombre : `Dispositivo ${targetId}`,
+    actualizado_en: Date.now(),
+    actualizado_por: `${user.name} (${user.role}) [Restauración a Fábrica]`,
+    notas: 'Configuración restaurada a valores de ejemplo por defecto.'
+  };
+
+  const targetRef = ref(rtdb, `configuracion_alertas/${targetId}`);
+  await set(targetRef, restoredConfig);
+
+  return restoredConfig;
+}
+
+/**
+ * Registra un evento de superación o recuperación de umbral en Firebase RTDB
+ */
+export async function saveAlertThresholdEvent(event: AlertEventRecord): Promise<void> {
+  try {
+    const eventRef = ref(rtdb, `eventos_umbrales/${event.id}`);
+    await set(eventRef, event);
+
+    // Si el evento está activo y es de advertencia o crítico, reflejarlo en la lista de alertas activas
+    if (event.estado === 'activa' && (event.nivel === 'advertencia' || event.nivel === 'critico')) {
+      const safetyAlert: SafetyAlert = {
+        id: event.id,
+        code: `EVT-${event.variable.toUpperCase()}-${event.id.slice(-6)}`,
+        title: `Umbral ${event.nivel.toUpperCase()}: ${event.variable_label}`,
+        severity: event.nivel === 'critico' ? 'critico' : 'advertencia',
+        variableName: event.variable_label,
+        sensorId: event.dispositivo_id,
+        sensorCode: event.dispositivo_nombre || event.dispositivo_id,
+        sectorName: event.sector_nombre || 'Faena Central',
+        recordedValue: `${event.valor_detectado} ${event.unidad}`,
+        safeLimit: `< ${event.umbral_superado} ${event.unidad}`,
+        timestamp: event.fecha_hora,
+        acknowledged: false,
+        resolved: false,
+        suggestedAction: event.nivel === 'critico'
+          ? 'Evacuar el área inmediata, activar ventilación forzada y notificar a brigada de rescate.'
+          : 'Inspeccionar sensores del sector, verificar ductos de ventilación y advertir a la cuadrilla.'
+      };
+      await broadcastAlertToRTDB(safetyAlert);
+    }
+  } catch (err) {
+    console.warn('Error saving alert event in RTDB:', err);
+  }
+}
+
+/**
+ * Actualiza el estado de un evento de umbral (por ejemplo, al recuperarse a la normalidad)
+ */
+export async function updateAlertThresholdEvent(
+  eventId: string, 
+  updates: Partial<AlertEventRecord>
+): Promise<void> {
+  try {
+    const eventRef = ref(rtdb, `eventos_umbrales/${eventId}`);
+    await update(eventRef, updates);
+  } catch (err) {
+    console.warn('Error updating alert event in RTDB:', err);
+  }
+}
+
+/**
+ * Suscribe a los eventos históricos y en vivo generados por el motor de umbrales
+ */
+export function subscribeToAlertEvents(
+  callback: (events: AlertEventRecord[]) => void
+): () => void {
+  const eventsRef = ref(rtdb, 'eventos_umbrales');
+
+  return onValue(eventsRef, (snapshot) => {
+    if (snapshot.exists()) {
+      const data = snapshot.val();
+      const list: AlertEventRecord[] = Object.keys(data).map(k => ({
+        id: k,
+        ...data[k]
+      }));
+      list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      callback(list);
+    } else {
+      callback([]);
+    }
+  }, (err) => {
+    console.warn('Error subscribing to alert events:', err);
+    callback([]);
+  });
+}
+
 
 
 

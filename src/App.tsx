@@ -7,10 +7,10 @@ import { DevicesAndRentalsView } from './components/DevicesAndRentalsView';
 import { HistoricalReportsView } from './components/HistoricalReportsView';
 import { MiningSectorsView } from './components/MiningSectorsView';
 import { UsersManagementView } from './components/UsersManagementView';
-import { MineSafeAIView } from './components/MineSafeAIView';
+import { AlertConfigurationView } from './components/AlertConfigurationView';
 import { LoginModal } from './components/LoginModal';
 import { EmergencyModal, DrillType } from './components/EmergencyModal';
-import { recordRealTelemetryPoint } from './services/aiService';
+import { alertEngine } from './services/alertEngine';
 
 
 import { 
@@ -111,16 +111,8 @@ export default function App() {
           setDevices(remoteDevices);
           setIsFirebaseConnected(true);
 
-          // Alimentar el búfer de series temporales de MineSafe IA con datos reales
-          remoteDevices.forEach((dev) => {
-            recordRealTelemetryPoint(dev.id, {
-              coRaw: dev.rawCO,
-              pm25Raw: dev.rawPM25,
-              temperature: dev.rawTemp,
-              humidity: dev.rawHum,
-              timestamp: dev.lastUpdateServer && dev.lastUpdateServer > 0 ? dev.lastUpdateServer : Date.now(),
-            });
-          });
+          // Evaluar mediciones en tiempo real contra los umbrales dinámicos configurados
+          alertEngine.processAllDevices(remoteDevices);
         }
       });
 
@@ -857,12 +849,10 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'ia' && (
-          <MineSafeAIView
+        {currentTab === 'configuracion_alertas' && (
+          <AlertConfigurationView
             devices={devices}
-            activeDeviceId={activeTelemetryDeviceId}
-            onSelectDevice={setActiveTelemetryDeviceId}
-            currentSite={currentSite}
+            currentUser={currentUser}
           />
         )}
 

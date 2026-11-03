@@ -25,7 +25,7 @@ import {
   BellOff,
   RotateCcw,
   Smartphone,
-  Sparkles
+  Sliders
 } from 'lucide-react';
 import { NavigationTab, UserProfile } from '../types';
 import { soundAlert } from '../services/audioAlert';
@@ -92,7 +92,12 @@ export const Navbar: React.FC<NavbarProps> = ({
       icon: <AlertTriangle className="w-4 h-4 shrink-0" />, 
       badge: activeAlertCount > 0 ? activeAlertCount : undefined 
     },
-    { id: 'ia', label: 'MineSafe IA', shortLabel: 'IA Series', icon: <Sparkles className="w-4 h-4 shrink-0 text-cyan-400" /> },
+    { 
+      id: 'configuracion_alertas', 
+      label: 'Config. Umbrales', 
+      shortLabel: 'Umbrales', 
+      icon: <Sliders className="w-4 h-4 shrink-0 text-amber-400" /> 
+    },
     { id: 'equipos', label: 'Equipos y Arriendos', shortLabel: 'Equipos', icon: <Cpu className="w-4 h-4 shrink-0" /> },
     { id: 'reportes', label: 'Historial y Reportes', shortLabel: 'Reportes', icon: <FileText className="w-4 h-4 shrink-0" /> },
     { id: 'faenas', label: 'Faenas y Sectores', shortLabel: 'Sectores', icon: <MapPin className="w-4 h-4 shrink-0" /> },
