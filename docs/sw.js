@@ -1,18 +1,7 @@
-// MineSafe IoT Service Worker - Sernageomin DS 132
-const CACHE_NAME = 'minesafe-v2.4.0';
-const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon.svg'
-];
+// MineSafe IoT Service Worker - v3.0.1
+const CACHE_NAME = 'minesafe-v3.0.1';
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    })
-  );
   self.skipWaiting();
 });
 
@@ -21,6 +10,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) => {
       return Promise.all(
         keys.map((key) => {
+          // Eliminar todas las versiones previas de caché (evita pantallas blancas por caché corrupto)
           if (key !== CACHE_NAME) {
             return caches.delete(key);
           }
@@ -32,12 +22,16 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Peticiones GET: Network first, con fallback silencioso sin romper respuestas
   if (event.request.method !== 'GET') return;
+  
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      return cachedResponse || fetch(event.request).catch(() => {
-        return caches.match('/index.html');
-      });
-    })
+    fetch(event.request)
+      .then((response) => {
+        return response;
+      })
+      .catch(() => {
+        return caches.match(event.request);
+      })
   );
 });

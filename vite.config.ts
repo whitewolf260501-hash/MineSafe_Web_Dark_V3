@@ -10,6 +10,17 @@ export default defineConfig(({ command }) => {
       react(),
       tailwindcss(),
       {
+        name: 'html-entry-transform',
+        transformIndexHtml: {
+          order: 'pre',
+          handler(html) {
+            return html
+              .replace(/<script type="module" crossorigin src=".\/assets\/app\.js"><\/script>/, '<script type="module" src="/src/main.tsx"></script>')
+              .replace(/<link rel="stylesheet" crossorigin href=".\/assets\/index\.css">/, '');
+          },
+        },
+      },
+      {
         name: 'apk-mime-middleware',
         configureServer(server) {
           server.middlewares.use((req, res, next) => {
@@ -35,6 +46,16 @@ export default defineConfig(({ command }) => {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
-
+    build: {
+      outDir: 'dist',
+      emptyOutDir: true,
+      rollupOptions: {
+        output: {
+          entryFileNames: 'assets/app.js',
+          chunkFileNames: 'assets/[name].js',
+          assetFileNames: 'assets/[name].[ext]',
+        },
+      },
+    },
   };
 });
