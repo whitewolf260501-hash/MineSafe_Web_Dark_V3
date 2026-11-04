@@ -1,5 +1,5 @@
-// MineSafe IoT Service Worker - v3.0.1
-const CACHE_NAME = 'minesafe-v3.0.1';
+// MineSafe IoT - Service Worker Self-Unregister & Cache Cleaner
+// Elimina de forma permanente service workers y cachés corruptos para prevenir pantallas en blanco en GitHub Pages.
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -8,30 +8,17 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          // Eliminar todas las versiones previas de caché (evita pantallas blancas por caché corrupto)
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      );
+      return Promise.all(keys.map((key) => caches.delete(key)));
+    }).then(() => {
+      return self.registration.unregister();
+    }).then(() => {
+      return self.clients.matchAll();
+    }).then((clients) => {
+      clients.forEach((client) => {
+        if (client.url && 'navigate' in client) {
+          client.navigate(client.url);
+        }
+      });
     })
-  );
-  self.clients.claim();
-});
-
-self.addEventListener('fetch', (event) => {
-  // Peticiones GET: Network first, con fallback silencioso sin romper respuestas
-  if (event.request.method !== 'GET') return;
-  
-  event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        return response;
-      })
-      .catch(() => {
-        return caches.match(event.request);
-      })
   );
 });
