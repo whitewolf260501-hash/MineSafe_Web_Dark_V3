@@ -78,6 +78,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onChangeUserModal,
 }) => {
   const activeDevice = devices.find(d => d.id === activeTelemetryDeviceId) || devices[0];
+  const isSuperOrAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
 
   // Main 6 hero variables (matching reference image)
   const tempVar = variables.find(v => v.id === 'temp') || variables[0];
@@ -192,7 +193,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             devices={devices}
             activeDeviceId={activeTelemetryDeviceId || devices[0]?.id}
             onSelectDevice={(id) => onSelectTelemetryDevice?.(id)}
-            onSelectUser={() => onNavigateTab('usuarios')}
+            onSelectUser={() => isSuperOrAdmin ? onNavigateTab('usuarios') : (onChangeUserModal ? onChangeUserModal() : undefined)}
             onChangeUserModal={onChangeUserModal}
             activeAlertCount={activeAlerts.length}
           />
@@ -614,27 +615,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </p>
           </div>
 
-          {/* Card 8: Gestión de Dispositivos y Arriendos */}
-          <div 
-            onClick={() => onNavigateTab('equipos')}
-            className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-amber-900/30 hover:border-amber-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
-          >
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-amber-950/80 border border-amber-700/60 flex items-center justify-center text-amber-300 group-hover:scale-105 transition-transform">
-                <Layers className="w-5 h-5" />
+          {/* Card 8: Gestión de Dispositivos y Arriendos (Solo Admin) / Protocolos de Seguridad (Operador) */}
+          {isSuperOrAdmin ? (
+            <div 
+              onClick={() => onNavigateTab('equipos')}
+              className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-amber-900/30 hover:border-amber-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-lg bg-amber-950/80 border border-amber-700/60 flex items-center justify-center text-amber-300 group-hover:scale-105 transition-transform">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <h3 className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors">
+                  GESTIÓN DE ARRIENDOS
+                </h3>
               </div>
-              <h3 className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors">
-                GESTIÓN DE ARRIENDOS
-              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Supervisión de contratos de equipamiento IoT, cuotas de pago al día y estado de inventario arrendado.
+              </p>
             </div>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Supervisión de contratos de equipamiento IoT, cuotas de pago al día y estado de inventario arrendado.
-            </p>
-          </div>
+          ) : (
+            <div 
+              onClick={() => onNavigateTab('alertas')}
+              className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-cyan-300 group-hover:scale-105 transition-transform">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <h3 className="text-sm font-bold text-white group-hover:text-cyan-300 transition-colors">
+                  PROTOCOLOS DE SEGURIDAD
+                </h3>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Normativas de seguridad operacional DS 132, umbrales de evacuación y procedimientos ante emergencias.
+              </p>
+            </div>
+          )}
 
           {/* Card 9: Facilidad de Integración IoT */}
           <div 
-            onClick={() => onNavigateTab('equipos')}
+            onClick={() => onNavigateTab(isSuperOrAdmin ? 'equipos' : 'monitoreo')}
             className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
           >
             <div className="flex items-center gap-3 mb-3">
@@ -652,7 +672,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Card 10: Mantenimiento Preventivo */}
           <div 
-            onClick={() => onNavigateTab('equipos')}
+            onClick={() => onNavigateTab(isSuperOrAdmin ? 'equipos' : 'monitoreo')}
             className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
           >
             <div className="flex items-center gap-3 mb-3">
@@ -670,7 +690,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Card 11: Asignación a Trabajadores */}
           <div 
-            onClick={() => onNavigateTab('equipos')}
+            onClick={() => onNavigateTab(isSuperOrAdmin ? 'equipos' : 'monitoreo')}
             className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
           >
             <div className="flex items-center gap-3 mb-3">

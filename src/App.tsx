@@ -669,6 +669,23 @@ export default function App() {
   const isDustCritical = isDeviceOnline && rawDust >= 500;
   const isFieldEmergencyActive = (isGasCritical || isDustCritical || isAlarmActive || isDrillActive) && !dismissEmergencyBanner;
 
+  const isSuperOrAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
+
+  // Proteger pestañas administrativas contra accesos no autorizados de usuarios normales
+  useEffect(() => {
+    if (!isSuperOrAdmin && (currentTab === 'configuracion_alertas' || currentTab === 'equipos' || currentTab === 'usuarios')) {
+      setCurrentTab('dashboard');
+    }
+  }, [isSuperOrAdmin, currentTab]);
+
+  const handleSelectTab = useCallback((tab: NavigationTab) => {
+    if (!isSuperOrAdmin && (tab === 'configuracion_alertas' || tab === 'equipos' || tab === 'usuarios')) {
+      setCurrentTab('dashboard');
+      return;
+    }
+    setCurrentTab(tab);
+  }, [isSuperOrAdmin]);
+
   // GATEKEEPER: Require login before entering the application
   if (!currentUser) {
     return (
@@ -690,7 +707,7 @@ export default function App() {
       {/* Top Navbar */}
       <Navbar
         currentTab={currentTab}
-        onSelectTab={setCurrentTab}
+        onSelectTab={handleSelectTab}
         activeAlertCount={activeAlerts.length}
         currentUser={currentUser}
         onChangeUser={() => setShowLoginModal(true)}
@@ -850,21 +867,53 @@ export default function App() {
         )}
 
         {currentTab === 'configuracion_alertas' && (
-          <AlertConfigurationView
-            devices={devices}
-            currentUser={currentUser}
-          />
+          isSuperOrAdmin ? (
+            <AlertConfigurationView
+              devices={devices}
+              currentUser={currentUser}
+            />
+          ) : (
+            <div className="p-8 text-center bg-slate-900/80 border border-slate-800 rounded-2xl max-w-xl mx-auto my-12 shadow-xl">
+              <ShieldAlert className="w-12 h-12 text-amber-500 mx-auto mb-4" />
+              <h2 className="text-xl font-bold text-white mb-2">Acceso Restringido</h2>
+              <p className="text-slate-400 text-sm mb-6">
+                El módulo de Configuración de Umbrales está reservado únicamente para Administradores y Prevencionistas de Riesgos autorizados.
+              </p>
+              <button
+                onClick={() => setCurrentTab('dashboard')}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg text-sm transition-colors shadow-lg"
+              >
+                Volver al Dashboard
+              </button>
+            </div>
+          )
         )}
 
         {currentTab === 'equipos' && (
-          <DevicesAndRentalsView
-            rentals={rentals}
-            assignments={assignments}
-            devices={devices}
-            onAddAssignment={handleAddAssignment}
-            onAddRentalContract={handleAddRentalContract}
-            onRecordPayment={handleRecordPayment}
-          />
+          isSuperOrAdmin ? (
+            <DevicesAndRentalsView
+              rentals={rentals}
+              assignments={assignments}
+              devices={devices}
+              onAddAssignment={handleAddAssignment}
+              onAddRentalContract={handleAddRentalContract}
+              onRecordPayment={handleRecordPayment}
+            />
+          ) : (
+            <div className="p-8 text-center bg-slate-900/80 border border-slate-800 rounded-2xl max-w-xl mx-auto my-12 shadow-xl">
+              <ShieldAlert className="w-12 h-12 text-amber-500 mx-auto mb-4" />
+              <h2 className="text-xl font-bold text-white mb-2">Acceso Restringido</h2>
+              <p className="text-slate-400 text-sm mb-6">
+                El módulo de Equipos y Contratos de Arriendo está reservado para Administradores y Supervisores de Faena.
+              </p>
+              <button
+                onClick={() => setCurrentTab('dashboard')}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg text-sm transition-colors shadow-lg"
+              >
+                Volver al Dashboard
+              </button>
+            </div>
+          )
         )}
 
         {currentTab === 'reportes' && (
