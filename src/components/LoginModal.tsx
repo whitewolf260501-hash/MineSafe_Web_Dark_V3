@@ -175,18 +175,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
-    const roleLabels: Record<UserRole, string> = {
-      superadmin: 'Super Administrador de Seguridad Minera',
-      admin: 'Administrador / Prevencionista Sernageomin',
-      operador: 'Usuario Normal / Operador de Faena',
-    };
-
+    // Por protocolo de seguridad DS 132, todo nuevo registro inicia obligatoriamente como Operador (Usuario Normal)
     const newUser: UserProfile = {
       id: `usr-${Date.now()}`,
       name: regName.trim(),
       email: regEmail.trim(),
-      role: regRole,
-      roleLabel: roleLabels[regRole],
+      role: 'operador',
+      roleLabel: 'Usuario Normal / Operador de Faena',
       rut: regRut || '17.654.321-K',
       shift: regShift,
       status: 'activo',
@@ -198,9 +193,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     onRegisterUser(newUser);
     onLogin(newUser);
     soundAlert.playFeedbackBeep();
-    setSuccessMessage('Usuario registrado y autenticado exitosamente en Firebase.');
+    setSuccessMessage('Cuenta creada exitosamente con rol Operador. Solo un Administrador o SuperAdmin puede otorgar credenciales superiores.');
     if (!isGateMode) {
-      setTimeout(() => onClose(), 1000);
+      setTimeout(() => onClose(), 1200);
     }
   };
 
@@ -636,17 +631,27 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
 
             <div>
-              <label className="text-slate-300 block mb-1">Rol en Faena</label>
-              <select
-                value={regRole}
-                onChange={(e) => setRegRole(e.target.value as UserRole)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
-              >
-                <option value="operador">Usuario Normal / Operador</option>
-                <option value="admin">Administrador / Prevencionista</option>
-                <option value="superadmin">Super Administrador</option>
-              </select>
+              <label className="text-slate-300 block mb-1 flex items-center justify-between">
+                <span>Rol Asignado</span>
+                <span className="text-[10px] text-amber-400 font-semibold flex items-center gap-1">
+                  <Lock className="w-2.5 h-2.5" /> Fijo
+                </span>
+              </label>
+              <div className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-amber-300 text-xs font-semibold flex items-center justify-between">
+                <span className="truncate">Usuario Normal / Operador</span>
+                <span className="text-[9px] bg-amber-950 text-amber-400 px-1.5 py-0.5 rounded border border-amber-800 font-mono shrink-0 ml-1">
+                  DS 132
+                </span>
+              </div>
             </div>
+          </div>
+
+          {/* Nota de seguridad sobre asignación de roles */}
+          <div className="bg-amber-950/30 border border-amber-800/40 rounded-lg p-2.5 text-[11px] text-amber-300/90 flex items-start gap-2">
+            <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <p className="leading-relaxed">
+              <strong>Protocolo de credenciales:</strong> Todo registro nuevo inicia únicamente como <strong>Usuario Normal / Operador</strong>. Solo un <strong>Administrador</strong> o <strong>SuperAdmin</strong> puede otorgar permisos superiores desde Gestión de Usuarios.
+            </p>
           </div>
 
           <div>

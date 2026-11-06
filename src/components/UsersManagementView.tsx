@@ -249,15 +249,15 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
                     </span>
                   </td>
                   <td className="px-4 py-3.5">
-                    {isSuperAdmin && user.id !== currentUser.id ? (
+                    {(isSuperAdmin || currentUser.role === 'admin') && user.id !== currentUser.id ? (
                       <div className="flex items-center gap-2">
                         <select
                           value={user.role}
                           onChange={(e) => onUpdateUserRole(user.id, e.target.value as UserRole)}
-                          className="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-[11px] text-slate-200"
+                          className="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-[11px] text-cyan-200 font-medium focus:border-cyan-500"
                         >
-                          <option value="superadmin">SuperAdmin</option>
-                          <option value="admin">Admin</option>
+                          {isSuperAdmin && <option value="superadmin">SuperAdmin</option>}
+                          <option value="admin">Admin (Prevencionista)</option>
                           <option value="operador">Operador (Normal)</option>
                         </select>
                         <button
