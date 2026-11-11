@@ -853,6 +853,7 @@ export default function App() {
         {currentTab === 'alertas' && (
           <AlertsView
             alerts={alerts}
+            devices={devices}
             currentUser={currentUser}
             onAcknowledgeAlert={handleAcknowledgeAlert}
             onResolveAlert={handleResolveAlert}

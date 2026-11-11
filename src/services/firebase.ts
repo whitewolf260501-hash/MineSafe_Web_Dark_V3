@@ -25,7 +25,8 @@ import {
   DrillDebriefRecord,
   DeviceThresholdsConfig,
   ThresholdVariableConfig,
-  AlertEventRecord
+  AlertEventRecord,
+  AlarmAuditRecord
 } from '../types';
 
 export const USER_RTDB_URL = "https://minefase-fc5f5-default-rtdb.firebaseio.com/";
@@ -309,6 +310,57 @@ export function subscribeToRTDBDevices(callback: (devices: SensorDevice[]) => vo
     unsub1();
     unsub2();
   };
+}
+
+export function extractAlarmAuditRecords(devices: SensorDevice[]): AlarmAuditRecord[] {
+  const records: AlarmAuditRecord[] = [];
+
+  devices.forEach((dev) => {
+    if (dev.registroAlarmas && typeof dev.registroAlarmas === 'object') {
+      Object.keys(dev.registroAlarmas).forEach((alarmKey) => {
+        const item = dev.registroAlarmas![alarmKey];
+        if (item) {
+          records.push({
+            id: alarmKey,
+            deviceId: dev.id,
+            deviceName: dev.name,
+            fecha: item.fecha || dev.fecha || '11/11/2026',
+            hora: item.hora || dev.hora || '00:00:00',
+            origen: item.origen || item.origen_alarma || dev.origenAlarma || 'CAUSA_NATURAL_SENSORES',
+            descripcion: item.descripcion || item.descripcion_monitoreo || dev.descripcionMonitoreo || 'Alarma registrada en nodo ESP32',
+            co: typeof item.CO === 'number' ? item.CO : (typeof item.co === 'number' ? item.co : (dev.rawCO || 0)),
+            pm25: typeof item.PM2_5 === 'number' ? item.PM2_5 : (typeof item.pm25 === 'number' ? item.pm25 : (dev.rawPM25 || 0)),
+            temperatura: typeof item.temperatura === 'number' ? item.temperatura : (typeof item.temp === 'number' ? item.temp : (dev.rawTemp || 0)),
+            humedad: typeof item.humedad === 'number' ? item.humedad : (typeof item.hum === 'number' ? item.hum : (dev.rawHum || 0)),
+            via: item.via || 'WIFI_DIRECTO',
+            timestampServer: item.timestamp_server || item.last_update_server || 0,
+          });
+        }
+      });
+    }
+  });
+
+  return records.sort((a, b) => {
+    if (b.timestampServer && a.timestampServer) {
+      return b.timestampServer - a.timestampServer;
+    }
+    return b.hora.localeCompare(a.hora);
+  });
+}
+
+export function subscribeToRTDBAlarmRecords(callback: (records: AlarmAuditRecord[]) => void): () => void {
+  const devicesRef = ref(rtdb, 'dispositivos');
+  const unsub = onValue(devicesRef, (snapshot) => {
+    if (snapshot.exists()) {
+      const data = snapshot.val() || {};
+      const devList: SensorDevice[] = Object.keys(data).map(k => mapRTDBDeviceToSensorDevice(k, data[k]));
+      const records = extractAlarmAuditRecords(devList);
+      callback(records);
+    } else {
+      callback([]);
+    }
+  });
+  return unsub;
 }
 
 export function subscribeToRTDBUsers(callback: (users: UserProfile[]) => void): () => void {

@@ -25,7 +25,8 @@ import {
   Sparkles,
   Zap,
   Volume2,
-  VolumeX
+  VolumeX,
+  Download
 } from 'lucide-react';
 import { SensorDevice } from '../types';
 import { 
@@ -158,6 +159,28 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
     } finally {
       setIsResettingGateway(false);
     }
+  };
+
+  // Descarga directa de registro_alarmas para el dispositivo seleccionado
+  const handleDownloadDeviceAlarmCSV = () => {
+    if (!currentDevice?.registroAlarmas) return;
+    soundAlert.playFeedbackBeep();
+    const headers = 'ID_Registro;Fecha;Hora;Origen;Gas_CO_ADC;PM25_ugm3;Temp_C;Hum_Porc;Via;Descripcion\n';
+    const rows = Object.keys(currentDevice.registroAlarmas).map((k) => {
+      const item = currentDevice.registroAlarmas![k];
+      const desc = (item.descripcion || '').replace(/[\r\n;]/g, ' ');
+      return `${k};${item.fecha || ''};${item.hora || ''};${item.origen || ''};${item.CO || 0};${item.PM2_5 || 0};${item.temperatura || 0};${item.humedad || 0};${item.via || 'WIFI_DIRECTO'};"${desc}"`;
+    }).join('\n');
+
+    const blob = new Blob(['\uFEFF' + headers + rows], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Alarmas_${currentDevice.id}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showNotification(`Historial de alarmas descargado en formato Excel / CSV para ${currentDevice.id}.`);
   };
 
   // 3. Activar y desactivar la alarma
@@ -512,12 +535,25 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
               </p>
             </div>
           </div>
-          {currentDevice?.alarmaActiva && (
-            <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-900/80 border border-rose-600 text-rose-100 font-bold text-[11px] animate-pulse">
-              <BellRing className="w-3.5 h-3.5" />
-              <span>SIRENA ACTIVA</span>
-            </div>
-          )}
+          <div className="shrink-0 flex items-center gap-2">
+            {currentDevice?.registroAlarmas && (
+              <button
+                type="button"
+                onClick={handleDownloadDeviceAlarmCSV}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Descargar historial de alarmas de este nodo en Excel / CSV"
+              >
+                <Download className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Auditoría CSV</span>
+              </button>
+            )}
+            {currentDevice?.alarmaActiva && (
+              <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-900/80 border border-rose-600 text-rose-100 font-bold text-[11px] animate-pulse">
+                <BellRing className="w-3.5 h-3.5" />
+                <span>SIRENA ACTIVA</span>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

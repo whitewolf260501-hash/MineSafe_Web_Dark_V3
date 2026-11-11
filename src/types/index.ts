@@ -52,6 +52,22 @@ export interface SensorDevice {
   registroAlarmas?: Record<string, any>;
 }
 
+export interface AlarmAuditRecord {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  fecha: string;
+  hora: string;
+  origen: string;
+  descripcion: string;
+  co: number;
+  pm25: number;
+  temperatura: number;
+  humedad: number;
+  via?: string;
+  timestampServer?: number;
+}
+
 export interface ESP32GatewayData {
   deviceId: string;
   name: string;
