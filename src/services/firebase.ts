@@ -63,6 +63,13 @@ export async function testConnection(): Promise<boolean> {
 // -------------------------------------------------------------
 // MAPPER UTILS FOR USER'S RTDB SCHEMA
 // -------------------------------------------------------------
+// Cache of local reception times per device node to safeguard against NTP clock skew
+const lastPacketArrivalMap: Record<string, number> = {};
+
+export function recordDevicePacketArrival(key: string) {
+  lastPacketArrivalMap[key] = Date.now();
+}
+
 export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevice {
   const coVal = typeof data?.CO === 'number' ? data.CO : (typeof data?.co === 'number' ? data.co : 12);
   const pmVal = typeof data?.PM2_5 === 'number' ? data.PM2_5 : (typeof data?.pm25 === 'number' ? data.pm25 : 25);
@@ -75,16 +82,20 @@ export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevic
     serverTime = serverTime * 1000;
   }
 
-  // Connection check: under 15 seconds difference as requested
-  const diffSeconds = serverTime > 0 ? Math.floor(Math.abs(Date.now() - serverTime) / 1000) : 999999;
-  const isOnline = diffSeconds <= 15;
+  // Connection check: under 20 seconds difference or recent WebSocket RTDB packet
+  const now = Date.now();
+  const diffSeconds = serverTime > 0 ? Math.floor(Math.abs(now - serverTime) / 1000) : 999999;
+  const lastArrival = lastPacketArrivalMap[key] || 0;
+  const arrivalDiff = lastArrival > 0 ? Math.floor((now - lastArrival) / 1000) : 999999;
+
+  const isOnline = diffSeconds <= 20 || arrivalDiff <= 20;
 
   const alarmaActiva = Boolean(data?.alarma_activa);
   const origenAlarma = data?.origen_alarma || '';
   const descripcionMonitoreo = data?.descripcion_monitoreo || '';
 
   // Determine status based on industrial safety thresholds:
-  // If the device is offline (>15s without update), status is 'desconectado'
+  // If the device is offline (>20s without update), status is 'desconectado'
   let status: 'normal' | 'advertencia' | 'critico' | 'desconectado' = 'normal';
   if (!isOnline) {
     status = 'desconectado';
@@ -278,7 +289,11 @@ export function subscribeToRTDBDevices(callback: (devices: SensorDevice[]) => vo
 
   const unsub1 = onValue(devicesRef, (snapshot) => {
     if (snapshot.exists()) {
-      liveTelemetryMap = snapshot.val() || {};
+      const incoming = snapshot.val() || {};
+      Object.keys(incoming).forEach((k) => {
+        recordDevicePacketArrival(k);
+      });
+      liveTelemetryMap = incoming;
       emitCombined();
     }
   });
