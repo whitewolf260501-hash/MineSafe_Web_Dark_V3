@@ -1,0 +1,782 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <DNSServer.h>
+#include <esp_now.h>
+#include <esp_wifi.h>
+#include <Firebase_ESP_Client.h>
+#include <addons/TokenHelper.h>
+#include <addons/RTDBHelper.h>
+#include <DHTesp.h>
+#include <TFT_eSPI.h>
+#include "driver/i2s.h"
+#include "time.h"
+
+// =======================================
+// CONFIGURACIÓN DE DISPOSITIVO Y RED
+// =======================================
+const char NODE_ID[32] = "device_38A839E81F84";
+#define DISPOSITIVO_PATH "/dispositivos/device_38A839E81F84"
+
+#define WIFI_SSID       "WIFI_MINERA"
+#define WIFI_PASSWORD   "CLAVE_SEGURA"
+#define FIREBASE_HOST   "https://minefase-fc5f5-default-rtdb.firebaseio.com"
+
+// Servidor NTP para Fecha y Hora Real (Chile UTC-3)
+const char* ntpServer = "pool.ntp.org";
+const long  gmtOffset_sec = -3 * 3600;
+const int   daylightOffset_sec = 0;
+
+// =======================================
+// ASIGNACIÓN DE PINES (ESP32 Estándar)
+// =======================================
+#define MQ2_PIN          34   // AO del MQ-2 (ADC1)
+#define PM25_VO_PIN      35   // Vo del Sharp GP2Y10 (ADC1)
+#define PM25_LED_PIN     33   // Pulso LED Sharp GP2Y10 (Activo en LOW)
+
+#define DHT_PIN          14   // Data del DHT11
+#define BALIZA_PIN       26   // Señal MOSFET baliza 12V
+#define BOTON_MANUAL     0    // Botón BOOT (Armar / Desarmar / Silenciar)
+#define BOTON_VENTANAS   4    // Botón externo para cambiar ventana UI
+
+#define I2S_BCLK         25
+#define I2S_LRC          12   
+#define I2S_DIN          27
+#define SAMPLE_RATE      16000
+
+// =======================================
+// UMBRALES Y CALIBRACIÓN
+// =======================================
+#define UMBRAL_MQ2_PRECAUCION  350
+#define UMBRAL_MQ2_CRITICO     500
+
+const float PM25_VOLTAJE_BASE = 0.66;
+#define UMBRAL_PM25_PRECAUCION 55.0
+#define UMBRAL_PM25_CRITICO    150.0
+
+// Colores UI (RGB565)
+#define COLOR_BG          0x0862
+#define COLOR_CARD        0x10C4
+#define COLOR_BORDER      0x2187
+#define COLOR_ACCENT_GRN  0x076B
+#define COLOR_ACCENT_RED  0xF8A2
+#define COLOR_ACCENT_BLU  0x041F
+#define COLOR_TEXT_MUTED  0x94B2
+
+DHTesp dht;
+TFT_eSPI tft = TFT_eSPI();
+WebServer server(80);
+DNSServer dnsServer;
+
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig fbConfig;
+
+// =======================================
+// ESTRUCTURA ESP-NOW (CON DETALLE DE ALARMA)
+// =======================================
+typedef struct {
+  char nodeId[24];
+  uint32_t msgId;
+  int co;
+  int pm25;
+  int humedad;
+  float temperatura;
+  bool alarmaActiva;
+  bool esEventoNuevo;
+  bool guardarHistorial30s;
+  char fecha[12];
+  char hora[10];
+  char origen[28];
+  char descripcion[120];
+} DatosSensor;
+
+DatosSensor paquete;
+uint32_t contadorMensajes = 0;
+uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+// Variables de estado
+volatile bool sistemaArmado = false;
+volatile bool panicoManual = false;
+volatile bool estadoSirenaActiva = false;
+bool estadoSirenaPrevio = false;
+
+String origenAlarmaActual = "NINGUNO";
+String motivoUsuarioManual = "Activacion manual preventiva por operador";
+String descripcionCompletaActual = "Monitoreo normal: Todos los parametros dentro de rango seguro.";
+String fechaActualStr = "11/11/2026";
+String horaActualStr  = "00:00:00";
+
+volatile int ultimoMQ2Medido = 0;
+volatile float ultimoPM25Medido = 0.0;
+volatile float ultimaTemp = 0.0;
+volatile int ultimaHum = 0;
+
+int ventanaActual = 0;
+String estadoEnlace = "Iniciando";
+
+unsigned long ultimoRefresco = 0;
+unsigned long ultimoHistorial30s = 0;
+const unsigned long INTERVALO_HISTORIAL_MS = 30000; // 30 segundos exactos
+
+// Buffer local en RAM para descarga rápida de las últimas alarmas desde el panel Web
+String logAlarmasCSV = "Fecha,Hora,Origen,CO_ADC,PM25_ugm3,Temp_C,Humedad_%,Descripcion\n";
+
+// =======================================
+// OBTENER FECHA Y HORA FORMATEADA
+// =======================================
+void actualizarFechaHora(unsigned long &epochOut) {
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo, 50)) {
+    char bufFecha[16];
+    char bufHora[16];
+    strftime(bufFecha, sizeof(bufFecha), "%d/%m/%Y", &timeinfo);
+    strftime(bufHora, sizeof(bufHora), "%H:%M:%S", &timeinfo);
+    fechaActualStr = String(bufFecha);
+    horaActualStr  = String(bufHora);
+    time_t now;
+    time(&now);
+    epochOut = (unsigned long)now;
+  } else {
+    // Fallback con tiempo de actividad si no hay internet aún
+    unsigned long segs = millis() / 1000;
+    char bufHora[16];
+    sprintf(bufHora, "%02lu:%02lu:%02lu", (segs / 3600) % 24, (segs / 60) % 60, segs % 60);
+    horaActualStr = String(bufHora);
+    epochOut = millis();
+  }
+}
+
+// =======================================
+// GENERADOR DE DESCRIPCIÓN DETALLADA
+// =======================================
+String construirDescripcionDetallada(bool alarma, bool manual, int co, float pm25, float t, int h) {
+  char buffer[240];
+  if (!alarma) {
+    snprintf(buffer, sizeof(buffer),
+      "Monitoreo normal en rango seguro. Lecturas: Gas CO=%d ADC, Polvo PM2.5=%.1f ug/m3, Temp=%.1f C, Humedad=%d%%.",
+      co, pm25, t, h);
+  } else if (manual) {
+    snprintf(buffer, sizeof(buffer),
+      "Alarma activada MANUALMENTE. Detalle del usuario: %s. Estado sensores al activarse: Gas CO=%d ADC, PM2.5=%.1f ug/m3, Temp=%.1f C, Hum=%d%%.",
+      motivoUsuarioManual.c_str(), co, pm25, t, h);
+  } else {
+    String causaNatural = "";
+    if (co >= UMBRAL_MQ2_CRITICO && pm25 >= UMBRAL_PM25_CRITICO) {
+      causaNatural = "Concentracion critica simultanea de Gas CO y Polvo PM2.5";
+    } else if (co >= UMBRAL_MQ2_CRITICO) {
+      causaNatural = "Nivel critico de Gas inflamable/CO detectado por sensor MQ-2";
+    } else if (pm25 >= UMBRAL_PM25_CRITICO) {
+      causaNatural = "Densidad critica de polvo/humo detectada por sensor Sharp PM2.5";
+    }
+    snprintf(buffer, sizeof(buffer),
+      "Alarma activa por CAUSA NATURAL (%s). Valores registrados: CO=%d ADC (Umbral %d), PM2.5=%.1f ug/m3 (Umbral %.0f), Temp=%.1f C, Hum=%d%%.",
+      causaNatural.c_str(), co, UMBRAL_MQ2_CRITICO, pm25, UMBRAL_PM25_CRITICO, t, h);
+  }
+  return String(buffer);
+}
+
+// =======================================
+// MUESTREO SHARP GP2Y10
+// =======================================
+float leerVoltajePM25() {
+  digitalWrite(PM25_LED_PIN, LOW);
+  delayMicroseconds(280);
+  int rawADC = analogRead(PM25_VO_PIN);
+  delayMicroseconds(40);
+  digitalWrite(PM25_LED_PIN, HIGH);
+  delayMicroseconds(9680);
+  return (rawADC / 4095.0) * 3.3;
+}
+
+float calcularDensidadPM25() {
+  float suma = 0.0;
+  for (int i = 0; i < 5; i++) {
+    suma += leerVoltajePM25();
+    delay(2);
+  }
+  float vProm = suma / 5.0;
+  return (vProm > PM25_VOLTAJE_BASE) ? (vProm - PM25_VOLTAJE_BASE) * 588.2 : 0.0;
+}
+
+// =======================================
+// AUDIO DIGITAL I2S
+// =======================================
+void iniciarI2S() {
+  i2s_config_t i2s_config = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
+    .sample_rate = SAMPLE_RATE,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+    .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 6,
+    .dma_buf_len = 64,
+    .use_apll = false,
+    .tx_desc_auto_clear = true
+  };
+
+  i2s_pin_config_t pin_config = {
+    .bck_io_num = I2S_BCLK,
+    .ws_io_num = I2S_LRC,
+    .data_out_num = I2S_DIN,
+    .data_in_num = I2S_PIN_NO_CHANGE
+  };
+
+  i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
+  i2s_set_pin(I2S_NUM_0, &pin_config);
+}
+
+void sonarSirena(int frecuencia, int duracionMs) {
+  int numMuestras = (SAMPLE_RATE * duracionMs) / 1000;
+  int16_t buffer[64];
+  size_t bytesEscritos;
+  float paso = (2.0 * PI * frecuencia) / SAMPLE_RATE;
+  float fase = 0;
+  int muestrasRestantes = numMuestras;
+
+  while (muestrasRestantes > 0) {
+    int lote = (muestrasRestantes > 32) ? 32 : muestrasRestantes;
+    for (int i = 0; i < lote; i++) {
+      int16_t m = (int16_t)(sin(fase) * 32767.0);
+      buffer[i * 2] = m;
+      buffer[i * 2 + 1] = m;
+      fase += paso;
+      if (fase >= 2.0 * PI) fase -= 2.0 * PI;
+    }
+    i2s_write(I2S_NUM_0, buffer, lote * 4, &bytesEscritos, portMAX_DELAY);
+    muestrasRestantes -= lote;
+  }
+}
+
+void ejecutarPatronSirena() {
+  for (int f = 900; f <= 1900; f += 150) sonarSirena(f, 6);
+  for (int f = 1900; f >= 900; f -= 150) sonarSirena(f, 6);
+}
+
+// =======================================
+// PANTALLA ST7789 (3 VENTANAS CON FECHA/HORA)
+// =======================================
+void renderizarVentana(int ventana, int co, float pm25, float t, int h, bool sirena) {
+  tft.fillScreen(COLOR_BG);
+
+  // Barra Superior con Hora y Estado
+  tft.fillCircle(12, 12, 4, (WiFi.status() == WL_CONNECTED) ? COLOR_ACCENT_GRN : TFT_ORANGE);
+  tft.setTextDatum(ML_DATUM);
+  tft.setTextColor(TFT_WHITE, COLOR_BG);
+  tft.drawString(horaActualStr, 22, 12, 2);
+
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+  tft.drawString(fechaActualStr, 160, 12, 2);
+
+  tft.setTextDatum(MR_DATUM);
+  tft.setTextColor(sistemaArmado ? COLOR_ACCENT_GRN : COLOR_TEXT_MUTED, COLOR_BG);
+  tft.drawString(sistemaArmado ? "ARMADO" : "DESARMADO", 312, 12, 2);
+
+  if (ventana == 0) {
+    uint16_t bannerColor = sirena ? COLOR_ACCENT_RED : (sistemaArmado ? COLOR_ACCENT_GRN : 0x2A69);
+    tft.fillRoundRect(8, 26, 304, 46, 8, bannerColor);
+    tft.drawRoundRect(8, 26, 304, 46, 8, TFT_WHITE);
+    tft.fillCircle(35, 49, 12, TFT_WHITE);
+    tft.setTextColor(bannerColor, TFT_WHITE);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(sirena ? "!" : (sistemaArmado ? "V" : "-"), 35, 49, 4);
+
+    tft.setTextColor(TFT_WHITE, bannerColor);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString(sirena ? "! ALARMA ACTIVA !" : (sistemaArmado ? "Entorno Seguro" : "Vigilancia en Pausa"), 58, 30, 4);
+    tft.drawString(sirena ? origenAlarmaActual.c_str() : "Monitoreo activo cada 30s", 58, 53, 1);
+
+    int cardW = 96, cardH = 68, y1 = 78;
+    // PM2.5
+    tft.fillRoundRect(8, y1, cardW, cardH, 6, COLOR_CARD);
+    tft.drawRoundRect(8, y1, cardW, cardH, 6, COLOR_BORDER);
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_CARD);
+    tft.drawString("PM2.5", 14, y1 + 6, 2);
+    tft.setTextColor(TFT_WHITE, COLOR_CARD);
+    tft.drawString(String((int)pm25), 14, y1 + 24, 4);
+    uint16_t cPM = (pm25 >= UMBRAL_PM25_CRITICO) ? COLOR_ACCENT_RED : COLOR_ACCENT_GRN;
+    tft.fillRoundRect(14, y1 + 48, 84, 14, 4, cPM);
+    tft.setTextColor(TFT_BLACK, cPM);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString((pm25 >= UMBRAL_PM25_CRITICO) ? "CRITICO" : "Normal", 56, y1 + 55, 1);
+
+    // Temp
+    tft.fillRoundRect(112, y1, cardW, cardH, 6, COLOR_CARD);
+    tft.drawRoundRect(112, y1, cardW, cardH, 6, COLOR_BORDER);
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_CARD);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("Temp.", 118, y1 + 6, 2);
+    tft.setTextColor(TFT_WHITE, COLOR_CARD);
+    tft.drawString(String(t, 1), 118, y1 + 24, 4);
+    tft.fillRoundRect(118, y1 + 48, 84, 14, 4, COLOR_ACCENT_GRN);
+    tft.setTextColor(TFT_BLACK, COLOR_ACCENT_GRN);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("Normal", 160, y1 + 55, 1);
+
+    // Humedad
+    tft.fillRoundRect(216, y1, cardW, cardH, 6, COLOR_CARD);
+    tft.drawRoundRect(216, y1, cardW, cardH, 6, COLOR_BORDER);
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_CARD);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("Humedad", 222, y1 + 6, 2);
+    tft.setTextColor(TFT_WHITE, COLOR_CARD);
+    tft.drawString(String(h), 222, y1 + 24, 4);
+    tft.fillRoundRect(222, y1 + 48, 84, 14, 4, COLOR_ACCENT_GRN);
+    tft.setTextColor(TFT_BLACK, COLOR_ACCENT_GRN);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("Normal", 264, y1 + 55, 1);
+
+    // Fila 2: Gas y Actuadores
+    int y2 = 152;
+    tft.fillRoundRect(8, y2, 146, cardH, 6, COLOR_CARD);
+    tft.drawRoundRect(8, y2, 146, cardH, 6, COLOR_BORDER);
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_CARD);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("Gas CO (MQ-2)", 14, y2 + 6, 2);
+    tft.setTextColor(TFT_WHITE, COLOR_CARD);
+    tft.drawString(String(co), 14, y2 + 24, 4);
+    uint16_t cCO = (co >= UMBRAL_MQ2_CRITICO) ? COLOR_ACCENT_RED : COLOR_ACCENT_GRN;
+    tft.fillRoundRect(14, y2 + 48, 134, 14, 4, cCO);
+    tft.setTextColor(TFT_BLACK, cCO);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString((co >= UMBRAL_MQ2_CRITICO) ? "GAS CRITICO" : "Normal", 81, y2 + 55, 1);
+
+    tft.fillRoundRect(162, y2, 150, cardH, 6, COLOR_CARD);
+    tft.drawRoundRect(162, y2, 150, cardH, 6, COLOR_BORDER);
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_CARD);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("Actuadores", 172, y2 + 6, 2);
+    tft.setTextColor(TFT_WHITE, COLOR_CARD);
+    tft.drawString(sirena ? "Baliza: ACTIVA" : "Baliza: Apagada", 172, y2 + 24, 2);
+    tft.drawString(sirena ? "Sirena: SONANDO" : "Sirena: Inactiva", 172, y2 + 44, 2);
+
+  } else if (ventana == 1) {
+    tft.fillRoundRect(8, 30, 304, 185, 8, COLOR_CARD);
+    tft.drawRoundRect(8, 30, 304, 185, 8, COLOR_BORDER);
+    tft.setTextColor(TFT_WHITE, COLOR_CARD);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("DETALLE DE MONITOREO", 18, 38, 2);
+    tft.setTextColor(COLOR_ACCENT_GRN, COLOR_CARD);
+    tft.drawString("Origen: " + origenAlarmaActual, 18, 60, 2);
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_CARD);
+    tft.drawString("Fecha/Hora: " + fechaActualStr + " " + horaActualStr, 18, 82, 2);
+    tft.setTextColor(TFT_WHITE, COLOR_CARD);
+    tft.drawString("Nota Manual:", 18, 106, 2);
+    tft.drawString(motivoUsuarioManual.substring(0, 36), 18, 126, 2);
+    tft.drawString("Enlace: " + estadoEnlace, 18, 155, 2);
+    tft.drawString("Guardado Historial: Cada 30s", 18, 178, 2);
+
+  } else if (ventana == 2) {
+    tft.fillRoundRect(8, 30, 304, 185, 8, COLOR_CARD);
+    tft.drawRoundRect(8, 30, 304, 185, 8, COLOR_BORDER);
+    tft.setTextColor(TFT_WHITE, COLOR_CARD);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("SISTEMA Y DESCARGA", 18, 38, 2);
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_CARD);
+    tft.drawString("ID: " + String(NODE_ID), 18, 68, 2);
+    tft.drawString("AP Local: NODO_MINERO_01", 18, 92, 2);
+    tft.drawString("Panel Web: http://192.168.4.1", 18, 116, 2);
+    tft.drawString("Descarga CSV: /descargar_alarmas", 18, 140, 2);
+    tft.drawString("Nodo Firebase: /registro_alarmas", 18, 164, 2);
+  }
+
+  tft.fillRect(0, 222, 320, 18, 0x0000);
+  const char* tabs[3] = {"Inicio", "Detalle", "Info"};
+  for (int i = 0; i < 3; i++) {
+    int xTab = 8 + (i * 104);
+    if (ventana == i) {
+      tft.fillRoundRect(xTab, 222, 98, 17, 4, COLOR_ACCENT_BLU);
+      tft.setTextColor(TFT_WHITE, COLOR_ACCENT_BLU);
+    } else {
+      tft.setTextColor(COLOR_TEXT_MUTED, 0x0000);
+    }
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(tabs[i], xTab + 49, 230, 2);
+  }
+}
+
+// =======================================
+// TRANSMISIÓN FIREBASE + FALLBACK ESP-NOW
+// =======================================
+void registrarYTransmitir(int co, float pm25, float temp, int hum, bool alarma, bool esNuevoDisparo, bool tocaHistorial30s) {
+  contadorMensajes++;
+  unsigned long epochActual = 0;
+  actualizarFechaHora(epochActual);
+
+  descripcionCompletaActual = construirDescripcionDetallada(alarma, panicoManual, co, pm25, temp, hum);
+
+  // Si es un nuevo disparo de alarma, anexar al archivo CSV descargable en RAM
+  if (esNuevoDisparo) {
+    String lineaCSV = fechaActualStr + "," + horaActualStr + "," + origenAlarmaActual + "," +
+                      String(co) + "," + String(pm25, 1) + "," + String(temp, 1) + "," + String(hum) + ",\"" +
+                      descripcionCompletaActual + "\"\n";
+    logAlarmasCSV += lineaCSV;
+  }
+
+  bool subidoDirecto = false;
+
+  // 1. SUBIDA DIRECTA A FIREBASE VÍA WI-FI
+  if (WiFi.status() == WL_CONNECTED && Firebase.ready()) {
+    // A. Actualizar estado actual en la raíz del dispositivo
+    FirebaseJson jsonRaiz;
+    jsonRaiz.set("CO", co);
+    jsonRaiz.set("PM2_5", (int)pm25);
+    jsonRaiz.set("temperatura", temp);
+    jsonRaiz.set("humedad", hum);
+    jsonRaiz.set("alarma_activa", alarma);
+    jsonRaiz.set("origen_alarma", origenAlarmaActual);
+    jsonRaiz.set("descripcion_monitoreo", descripcionCompletaActual);
+    jsonRaiz.set("fecha", fechaActualStr);
+    jsonRaiz.set("hora", horaActualStr);
+    jsonRaiz.set("via", "WIFI_DIRECTO");
+    jsonRaiz.set("last_update_server", (int)epochActual);
+
+    if (Firebase.RTDB.updateNode(&fbdo, DISPOSITIVO_PATH, &jsonRaiz)) {
+      subidoDirecto = true;
+      estadoEnlace = "Firebase Directo";
+
+      // B. Si se cumplen los 30 segundos (o si acaba de saltar una alarma), guardar en /historial
+      if (tocaHistorial30s || esNuevoDisparo) {
+        FirebaseJson jsonHist;
+        jsonHist.set("CO", co);
+        jsonHist.set("PM2_5", (int)pm25);
+        jsonHist.set("temperatura", temp);
+        jsonHist.set("humedad", hum);
+        jsonHist.set("alarma_activa", alarma);
+        jsonHist.set("origen_alarma", origenAlarmaActual);
+        jsonHist.set("descripcion", descripcionCompletaActual);
+        jsonHist.set("fecha", fechaActualStr);
+        jsonHist.set("hora", horaActualStr);
+        jsonHist.set("timestamp_server", (int)epochActual);
+
+        // Clave determinista basada en msgId para evitar duplicados con el Gateway
+        String pathHist = String(DISPOSITIVO_PATH) + "/historial/msg_" + String(contadorMensajes);
+        Firebase.RTDB.setJSON(&fbdo, pathHist, &jsonHist);
+        Serial.printf("📦 [HISTORIAL 30s] Guardado en %s\n", pathHist.c_str());
+      }
+
+      // C. Nodo separado exclusivo de alarmas (/registro_alarmas) para descargas/auditoría
+      if (esNuevoDisparo) {
+        FirebaseJson jsonRegAlarma;
+        jsonRegAlarma.set("fecha", fechaActualStr);
+        jsonRegAlarma.set("hora", horaActualStr);
+        jsonRegAlarma.set("origen", origenAlarmaActual);
+        jsonRegAlarma.set("descripcion", descripcionCompletaActual);
+        jsonRegAlarma.set("CO", co);
+        jsonRegAlarma.set("PM2_5", (int)pm25);
+        jsonRegAlarma.set("temperatura", temp);
+        jsonRegAlarma.set("humedad", hum);
+        jsonRegAlarma.set("via", "WIFI_DIRECTO");
+        jsonRegAlarma.set("timestamp_server", (int)epochActual);
+
+        String pathAlarma = String(DISPOSITIVO_PATH) + "/registro_alarmas/alm_" + String(contadorMensajes);
+        Firebase.RTDB.setJSON(&fbdo, pathAlarma, &jsonRegAlarma);
+        Serial.printf("🚨 [AUDITORÍA ALARMA] Guardada en %s\n", pathAlarma.c_str());
+      }
+    }
+  }
+
+  // 2. FALLBACK A ESP-NOW (Solo si no se pudo subir por Wi-Fi directo)
+  if (!subidoDirecto) {
+    estadoEnlace = "ESP-NOW Gateway";
+    strncpy(paquete.nodeId, NODE_ID, sizeof(paquete.nodeId));
+    paquete.msgId = contadorMensajes;
+    paquete.co = co;
+    paquete.pm25 = (int)pm25;
+    paquete.humedad = hum;
+    paquete.temperatura = temp;
+    paquete.alarmaActiva = alarma;
+    paquete.esEventoNuevo = esNuevoDisparo;
+    paquete.guardarHistorial30s = tocaHistorial30s;
+    strncpy(paquete.fecha, fechaActualStr.c_str(), sizeof(paquete.fecha));
+    strncpy(paquete.hora, horaActualStr.c_str(), sizeof(paquete.hora));
+    strncpy(paquete.origen, origenAlarmaActual.c_str(), sizeof(paquete.origen));
+    strncpy(paquete.descripcion, descripcionCompletaActual.c_str(), sizeof(paquete.descripcion));
+
+    esp_now_send(broadcastAddress, (uint8_t *)&paquete, sizeof(paquete));
+    Serial.printf("📡 [FALLBACK ESP-NOW] Paquete #%u enviado al Gateway\n", contadorMensajes);
+  }
+}
+
+// =======================================
+// PANEL WEB CON DESCRIPCIÓN Y DESCARGA CSV
+// =======================================
+const char PAGINA_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monitoreo y Auditoría de Alarmas</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; background: #0B0E14; color: #fff; margin: 0; padding: 15px; }
+    .container { max-width: 480px; margin: 0 auto; }
+    h2 { text-align: center; color: #00E676; margin: 5px 0 10px 0; }
+    .banner { padding: 14px; border-radius: 10px; text-align: center; font-weight: bold; margin-bottom: 12px; }
+    .desarmado { background: #161B26; color: #8F9CAE; border: 1px solid #2B3547; }
+    .armado { background: #004D25; color: #00E676; border: 1px solid #00E676; }
+    .peligro { background: #5A0A17; color: #FF1744; border: 1px solid #FF1744; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    .card { background: #161B26; padding: 12px; border-radius: 10px; border: 1px solid #2B3547; }
+    .card h4 { margin: 0 0 5px 0; color: #8F9CAE; font-size: 0.78em; text-transform: uppercase; }
+    .card .val { font-size: 1.4em; font-weight: bold; }
+    .full { grid-column: span 2; }
+    .desc-box { background: #161B26; padding: 12px; border-radius: 10px; border: 1px solid #2B3547; margin-bottom: 12px; font-size: 0.88em; line-height: 1.4; color: #ced4da; }
+    input[type="text"] { width: 100%; box-sizing: border-box; padding: 12px; border-radius: 8px; border: 1px solid #2B3547; background: #0B0E14; color: #fff; margin-bottom: 10px; }
+    button, .btn-link { display: block; width: 100%; box-sizing: border-box; text-align: center; text-decoration: none; padding: 13px; border: none; border-radius: 8px; font-size: 0.95em; font-weight: bold; cursor: pointer; margin-bottom: 8px; }
+    .btn-armar { background: #00E676; color: #0B0E14; }
+    .btn-desarmar { background: #2B3547; color: #fff; }
+    .btn-panico { background: #FF1744; color: #fff; }
+    .btn-silenciar { background: #FF9100; color: #fff; }
+    .btn-descargar { background: #007AFF; color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>AUDITORÍA NODO MINERO</h2>
+    <div id="banner" class="banner desarmado">CONECTANDO...</div>
+    <div class="grid">
+      <div class="card"><h4>PM2.5</h4><div class="val" id="pm">--</div></div>
+      <div class="card"><h4>Gas CO</h4><div class="val" id="co">--</div></div>
+      <div class="card"><h4>Clima</h4><div class="val"><span id="temp">--</span>°C | <span id="hum">--</span>%</div></div>
+      <div class="card"><h4>Fecha / Hora</h4><div class="val" style="font-size:1em;" id="reloj">--</div></div>
+    </div>
+
+    <div class="desc-box">
+      <strong>Detalle en Vivo (<span id="origen">--</span>):</strong><br>
+      <span id="descripcion">Cargando descripción...</span>
+    </div>
+
+    <input type="text" id="motivoInput" placeholder="Describe el motivo si activas alarma manual...">
+    <button class="btn-panico" onclick="activarManualConMotivo()">! ACTIVAR ALARMA MANUAL CON DETALLE !</button>
+    <button id="btn-toggle" class="btn-armar" onclick="cambiar()">ARMAR SISTEMA</button>
+    <button class="btn-silenciar" onclick="act('/silenciar')">SILENCIAR ALARMA</button>
+    <a class="btn-link btn-descargar" href="/descargar_alarmas" download="historial_alarmas.csv">DESCARGAR HISTORIAL DE ALARMAS (CSV)</a>
+  </div>
+  <script>
+    let arm = false;
+    function actualizar() {
+      fetch('/api/datos').then(r => r.json()).then(d => {
+        document.getElementById('pm').innerText = d.pm25.toFixed(1) + " ug/m3";
+        document.getElementById('co').innerText = d.co + " ADC";
+        document.getElementById('temp').innerText = d.t.toFixed(1);
+        document.getElementById('hum').innerText = d.h;
+        document.getElementById('reloj').innerText = d.fecha + " " + d.hora;
+        document.getElementById('origen').innerText = d.origen;
+        document.getElementById('descripcion').innerText = d.descripcion;
+        arm = d.armado;
+        const b = document.getElementById('banner');
+        const btn = document.getElementById('btn-toggle');
+        if (d.sirena) { b.className = "banner peligro"; b.innerText = "! ALARMA ACTIVA (" + d.origen + ") !"; }
+        else if (d.armado) { b.className = "banner armado"; b.innerText = "ENTORNO SEGURO (ARMADO)"; btn.className = "btn-desarmar"; btn.innerText = "DESARMAR SISTEMA"; }
+        else { b.className = "banner desarmado"; b.innerText = "SISTEMA DESARMADO"; btn.className = "btn-armar"; btn.innerText = "ARMAR SISTEMA"; }
+      }).catch(e => console.log(e));
+    }
+    function cambiar() { act(arm ? '/desarmar' : '/armar'); }
+    function act(u) { fetch(u).then(() => setTimeout(actualizar, 150)); }
+    function activarManualConMotivo() {
+      const txt = document.getElementById('motivoInput').value || 'Activada manualmente desde App Web';
+      fetch('/panico?motivo=' + encodeURIComponent(txt)).then(() => setTimeout(actualizar, 150));
+    }
+    setInterval(actualizar, 1500);
+    actualizar();
+  </script>
+</body>
+</html>
+)rawliteral";
+
+void tareaServidorWeb(void *pvParameters) {
+  IPAddress apIP(192, 168, 4, 1);
+  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+  WiFi.softAP("NODO_MINERO_01", "12345678");
+  dnsServer.start(53, "*", apIP);
+
+  server.on("/", HTTP_GET, []() { server.send_P(200, "text/html", PAGINA_HTML); });
+  server.on("/api/datos", HTTP_GET, []() {
+    String json = "{";
+    json += "\"co\":" + String(ultimoMQ2Medido) + ",";
+    json += "\"pm25\":" + String(ultimoPM25Medido, 1) + ",";
+    json += "\"t\":" + String(ultimaTemp, 1) + ",";
+    json += "\"h\":" + String(ultimaHum) + ",";
+    json += "\"armado\":" + String(sistemaArmado ? "true" : "false") + ",";
+    json += "\"sirena\":" + String(estadoSirenaActiva ? "true" : "false") + ",";
+    json += "\"fecha\":\"" + fechaActualStr + "\",";
+    json += "\"hora\":\"" + horaActualStr + "\",";
+    json += "\"origen\":\"" + origenAlarmaActual + "\",";
+    json += "\"descripcion\":\"" + descripcionCompletaActual + "\"";
+    json += "}";
+    server.send(200, "application/json", json);
+  });
+
+  server.on("/armar", HTTP_GET, []() { sistemaArmado = true; panicoManual = false; server.send(200, "text/plain", "OK"); });
+  server.on("/desarmar", HTTP_GET, []() { sistemaArmado = false; panicoManual = false; estadoSirenaActiva = false; digitalWrite(BALIZA_PIN, LOW); server.send(200, "text/plain", "OK"); });
+  server.on("/panico", HTTP_GET, []() {
+    if (server.hasArg("motivo") && server.arg("motivo").length() > 0) {
+      motivoUsuarioManual = server.arg("motivo");
+    } else {
+      motivoUsuarioManual = "Activacion manual por operador";
+    }
+    panicoManual = true;
+    estadoSirenaActiva = true;
+    server.send(200, "text/plain", "OK");
+  });
+  server.on("/silenciar", HTTP_GET, []() { panicoManual = false; estadoSirenaActiva = false; digitalWrite(BALIZA_PIN, LOW); server.send(200, "text/plain", "OK"); });
+
+  // Endpoint para descargar directamente las alarmas en formato CSV
+  server.on("/descargar_alarmas", HTTP_GET, []() {
+    server.sendHeader("Content-Disposition", "attachment; filename=historial_alarmas.csv");
+    server.send(200, "text/csv", logAlarmasCSV);
+  });
+
+  server.onNotFound([]() {
+    server.sendHeader("Location", "http://192.168.4.1/", true);
+    server.send(302, "text/plain", "");
+  });
+
+  server.begin();
+  for (;;) {
+    dnsServer.processNextRequest();
+    server.handleClient();
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
+}
+
+// =======================================
+// SETUP
+// =======================================
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+
+  pinMode(BALIZA_PIN, OUTPUT);
+  digitalWrite(BALIZA_PIN, LOW);
+  pinMode(BOTON_MANUAL, INPUT_PULLUP);
+  pinMode(BOTON_VENTANAS, INPUT_PULLUP);
+
+  analogSetAttenuation(ADC_11db);
+  pinMode(MQ2_PIN, INPUT);
+  pinMode(PM25_VO_PIN, INPUT);
+  pinMode(PM25_LED_PIN, OUTPUT);
+  digitalWrite(PM25_LED_PIN, HIGH);
+
+  tft.init();
+  tft.setRotation(1);
+  tft.fillScreen(COLOR_BG);
+
+  iniciarI2S();
+  dht.setup(DHT_PIN, DHTesp::DHT11);
+
+  // Modo dual AP + STA para permitir portal local, Wi-Fi Firebase y ESP-NOW
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 4000) {
+    delay(200);
+  }
+
+  // Sincronizar Fecha y Hora por NTP si hay internet
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+
+  if (esp_now_init() == ESP_OK) {
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+    esp_now_add_peer(&peerInfo);
+  }
+
+  fbConfig.database_url = FIREBASE_HOST;
+  fbConfig.signer.test_mode = true;
+  Firebase.begin(&fbConfig, &auth);
+  Firebase.reconnectWiFi(true);
+
+  xTaskCreatePinnedToCore(tareaServidorWeb, "WebTask", 8192, NULL, 1, NULL, 0);
+}
+
+// =======================================
+// LOOP PRINCIPAL
+// =======================================
+void loop() {
+  // 1. Botón físico BOOT: Si está sonando la silencia; si está en reposo cambia Armado/Desarmado
+  if (digitalRead(BOTON_MANUAL) == LOW) {
+    delay(50);
+    if (digitalRead(BOTON_MANUAL) == LOW) {
+      if (estadoSirenaActiva) {
+        panicoManual = false;
+        estadoSirenaActiva = false;
+        digitalWrite(BALIZA_PIN, LOW);
+      } else {
+        sistemaArmado = !sistemaArmado;
+      }
+      while (digitalRead(BOTON_MANUAL) == LOW) delay(10);
+    }
+  }
+
+  // 2. Botón GPIO 4: Cambiar ventana de la pantalla ST7789
+  if (digitalRead(BOTON_VENTANAS) == LOW) {
+    delay(50);
+    if (digitalRead(BOTON_VENTANAS) == LOW) {
+      ventanaActual = (ventanaActual + 1) % 3;
+      renderizarVentana(ventanaActual, ultimoMQ2Medido, ultimoPM25Medido, ultimaTemp, ultimaHum, estadoSirenaActiva);
+      while (digitalRead(BOTON_VENTANAS) == LOW) delay(10);
+    }
+  }
+
+  // 3. Evaluación de Sensores cada 2 segundos y Guardado de Historial cada 30 segundos
+  if (millis() - ultimoRefresco >= 2000) {
+    ultimoRefresco = millis();
+
+    ultimoMQ2Medido = analogRead(MQ2_PIN);
+    ultimoPM25Medido = calcularDensidadPM25();
+
+    TempAndHumidity lectura = dht.getTempAndHumidity();
+    ultimaHum = (dht.getStatus() == DHTesp::ERROR_NONE) ? (int)lectura.humidity : 0;
+    ultimaTemp = (dht.getStatus() == DHTesp::ERROR_NONE) ? lectura.temperature : 0.0;
+
+    bool gasCritico = (ultimoMQ2Medido >= UMBRAL_MQ2_CRITICO);
+    bool pmCritico  = (ultimoPM25Medido >= UMBRAL_PM25_CRITICO);
+
+    if (panicoManual) {
+      estadoSirenaActiva = true;
+      origenAlarmaActual = "ACTIVACION_MANUAL_USUARIO";
+    } else if (sistemaArmado && (gasCritico || pmCritico)) {
+      estadoSirenaActiva = true;
+      origenAlarmaActual = "CAUSA_NATURAL_SENSORES";
+    } else if (!panicoManual && (!sistemaArmado || (!gasCritico && !pmCritico))) {
+      estadoSirenaActiva = false;
+      origenAlarmaActual = "NINGUNO";
+    }
+
+    // Detectar si la alarma acaba de activarse en este instante
+    bool flancoSubidaAlarma = (estadoSirenaActiva && !estadoSirenaPrevio);
+    estadoSirenaPrevio = estadoSirenaActiva;
+
+    if (flancoSubidaAlarma) {
+      ventanaActual = 0; // Mostrar pantalla principal de emergencia
+    }
+
+    digitalWrite(BALIZA_PIN, estadoSirenaActiva ? HIGH : LOW);
+
+    // Evaluar si ya se cumplieron los 30 segundos para el historial
+    bool guardarHistorial30s = false;
+    if (millis() - ultimoHistorial30s >= INTERVALO_HISTORIAL_MS) {
+      ultimoHistorial30s = millis();
+      guardarHistorial30s = true;
+    }
+
+    // Subir estado, historial de 30s y registro detallado de alarma
+    registrarYTransmitir(ultimoMQ2Medido, ultimoPM25Medido, ultimaTemp, ultimaHum, estadoSirenaActiva, flancoSubidaAlarma, guardarHistorial30s);
+
+    // Actualizar interfaz gráfica
+    renderizarVentana(ventanaActual, ultimoMQ2Medido, ultimoPM25Medido, ultimaTemp, ultimaHum, estadoSirenaActiva);
+  }
+
+  if (estadoSirenaActiva) {
+    ejecutarPatronSirena();
+  }
+
+  delay(10);
+}
