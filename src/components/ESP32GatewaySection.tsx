@@ -480,6 +480,47 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
 
       </div>
 
+      {/* Detalle en Vivo de Monitoreo emitido por el firmware del ESP32 */}
+      {(currentDevice?.descripcionMonitoreo || currentDevice?.origenAlarma) && (
+        <div className={`mt-4 p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-colors ${
+          currentDevice?.alarmaActiva || currentDevice?.status === 'critico'
+            ? 'bg-rose-950/50 border-rose-800/80 text-rose-200'
+            : currentDevice?.status === 'advertencia'
+            ? 'bg-amber-950/40 border-amber-800/80 text-amber-200'
+            : 'bg-slate-950/80 border-slate-800 text-slate-300'
+        }`}>
+          <div className="flex items-start gap-2.5">
+            <Radio className={`w-4 h-4 shrink-0 mt-0.5 ${
+              currentDevice?.alarmaActiva ? 'text-rose-400 animate-pulse' : 'text-cyan-400'
+            }`} />
+            <div>
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="font-bold text-white">Telemetría de Firmware ESP32:</span>
+                {currentDevice?.origenAlarma && currentDevice.origenAlarma !== 'NINGUNO' && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-900/90 text-rose-200 border border-rose-700">
+                    {currentDevice.origenAlarma}
+                  </span>
+                )}
+                {currentDevice?.fecha && currentDevice?.hora && (
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    [{currentDevice.fecha} {currentDevice.hora}]
+                  </span>
+                )}
+              </div>
+              <p className="text-slate-300 leading-relaxed text-[11px]">
+                {currentDevice?.descripcionMonitoreo}
+              </p>
+            </div>
+          </div>
+          {currentDevice?.alarmaActiva && (
+            <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-900/80 border border-rose-600 text-rose-100 font-bold text-[11px] animate-pulse">
+              <BellRing className="w-3.5 h-3.5" />
+              <span>SIRENA ACTIVA</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ==============================================================
           PANEL DE COMANDOS RÁPIDOS IOT Y CONTROL DE FAENA
           (4 Botones Solicitados: Reset Página, Reset Gateway, Alarma, Luz)

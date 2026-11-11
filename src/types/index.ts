@@ -44,6 +44,12 @@ export interface SensorDevice {
     ruido: number;
     polvoPM: number;
   };
+  alarmaActiva?: boolean;
+  origenAlarma?: string;
+  descripcionMonitoreo?: string;
+  fecha?: string;
+  hora?: string;
+  registroAlarmas?: Record<string, any>;
 }
 
 export interface ESP32GatewayData {

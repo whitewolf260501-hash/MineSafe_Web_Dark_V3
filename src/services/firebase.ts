@@ -64,25 +64,33 @@ export async function testConnection(): Promise<boolean> {
 // MAPPER UTILS FOR USER'S RTDB SCHEMA
 // -------------------------------------------------------------
 export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevice {
-  const coVal = typeof data?.CO === 'number' ? data.CO : 12;
-  const pmVal = typeof data?.PM2_5 === 'number' ? data.PM2_5 : 25;
-  const tempVal = typeof data?.temperatura === 'number' ? data.temperatura : 22.4;
-  const humVal = typeof data?.humedad === 'number' ? data.humedad : 48;
-  const serverTime = Number(data?.last_update_server) || 0;
+  const coVal = typeof data?.CO === 'number' ? data.CO : (typeof data?.co === 'number' ? data.co : 12);
+  const pmVal = typeof data?.PM2_5 === 'number' ? data.PM2_5 : (typeof data?.pm25 === 'number' ? data.pm25 : 25);
+  const tempVal = typeof data?.temperatura === 'number' ? data.temperatura : (typeof data?.temp === 'number' ? data.temp : 22.4);
+  const humVal = typeof data?.humedad === 'number' ? data.humedad : (typeof data?.hum === 'number' ? data.hum : 48);
+  
+  let serverTime = Number(data?.last_update_server) || Number(data?.timestamp_server) || 0;
+  // Soportar timestamps en segundos (10 dígitos desde NTP de ESP32) convirtiéndolos a milisegundos (13 dígitos)
+  if (serverTime > 0 && serverTime < 100000000000) {
+    serverTime = serverTime * 1000;
+  }
 
   // Connection check: under 15 seconds difference as requested
   const diffSeconds = serverTime > 0 ? Math.floor(Math.abs(Date.now() - serverTime) / 1000) : 999999;
   const isOnline = diffSeconds <= 15;
 
+  const alarmaActiva = Boolean(data?.alarma_activa);
+  const origenAlarma = data?.origen_alarma || '';
+  const descripcionMonitoreo = data?.descripcion_monitoreo || '';
+
   // Determine status based on industrial safety thresholds:
   // If the device is offline (>15s without update), status is 'desconectado'
-  // (Prevents disconnected pins / floating 4095 ADC from triggering false alarms)
   let status: 'normal' | 'advertencia' | 'critico' | 'desconectado' = 'normal';
   if (!isOnline) {
     status = 'desconectado';
-  } else if (coVal >= 1000 || pmVal >= 500) {
+  } else if (alarmaActiva || coVal >= 500 || pmVal >= 150) {
     status = 'critico';
-  } else if (coVal >= 300 || pmVal >= 150) {
+  } else if (coVal >= 350 || pmVal >= 55) {
     status = 'advertencia';
   }
 
@@ -125,6 +133,12 @@ export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevic
     rawHum: humVal,
     lastUpdateServer: serverTime,
     gatewayOnline: isOnline,
+    alarmaActiva: alarmaActiva,
+    origenAlarma: origenAlarma,
+    descripcionMonitoreo: descripcionMonitoreo,
+    fecha: data?.fecha || '',
+    hora: data?.hora || '',
+    registroAlarmas: data?.registro_alarmas,
     metrics: {
       temperatura: Number(tempVal.toFixed(1)),
       humedad: Number(humVal.toFixed(0)),
