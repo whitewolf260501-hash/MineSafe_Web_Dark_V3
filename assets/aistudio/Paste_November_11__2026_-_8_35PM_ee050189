@@ -1,0 +1,1078 @@
+{
+  "contratos": {
+    "CONTRATO-001": {
+      "deviceId": "device_A4CB2F124B00",
+      "estadoGeneral": "Activo",
+      "fechaFinArriendo": "2026-03-31",
+      "fechaFinContrato": "2026-09-30",
+      "fechaInicioArriendo": "2025-11-01",
+      "fechaInicioContrato": "2025-10-01",
+      "idContrato": "CONTRATO-001",
+      "montoMensual": 15000,
+      "observaciones": "Contrato de prueba activo para Gerardo Cuellar.",
+      "proximoPago": "2025-12-01",
+      "userId": "avZLQk44v4evq0VsxO8QJDX8yRP2"
+    },
+    "CONTRATO-002": {
+      "deviceId": "device_38A839E81F84",
+      "estadoGeneral": "Por Vencer",
+      "fechaFinArriendo": "2025-12-15",
+      "fechaFinContrato": "2025-12-15",
+      "fechaInicioArriendo": "2025-05-15",
+      "fechaInicioContrato": "2025-05-15",
+      "idContrato": "CONTRATO-002",
+      "montoMensual": 25000,
+      "observaciones": "Contrato de SuperAdmin, vence en poco tiempo.",
+      "proximoPago": "2025-12-15",
+      "userId": "manual_temp_uid_01"
+    },
+    "CONTRATO-003": {
+      "deviceId": "device_A4CB2F124B00",
+      "estadoGeneral": "Finalizado",
+      "fechaFinArriendo": "2024-06-30",
+      "fechaFinContrato": "2024-06-30",
+      "fechaInicioArriendo": "2024-01-01",
+      "fechaInicioContrato": "2024-01-01",
+      "idContrato": "CONTRATO-003",
+      "montoMensual": 12000,
+      "observaciones": "Contrato antiguo ya finalizado.",
+      "userId": "usr001"
+    },
+    "CONTRATO-004": {
+      "deviceId": "device_38A839E81F84",
+      "estadoGeneral": "Arriendo Vencido",
+      "fechaFinArriendo": "2025-11-30",
+      "fechaFinContrato": "2026-03-20",
+      "fechaInicioArriendo": "2025-11-20",
+      "fechaInicioContrato": "2025-11-20",
+      "idContrato": "CONTRATO-004",
+      "montoMensual": 18000,
+      "observaciones": "El plazo de arriendo del dispositivo ya expiró, pero el contrato sigue activo.",
+      "userId": "usr005"
+    }
+  },
+  "dispositivos": {
+    "NODO_U-01": {
+      "CO": 912,
+      "PM2_5": 180,
+      "alarma_activa": true,
+      "origen_alarma": "CAUSA_NATURAL_SENSORES",
+      "descripcion_monitoreo": "Alarma activa por CAUSA NATURAL (Concentracion critica simultanea de Gas CO y Polvo PM2.5). Valores registrados: CO=912 ADC (Limite 500), PM2.5=180.0 ug/m3 (Limite 150), Temp=19.8 C, Hum=49%.",
+      "fecha": "11/11/2026",
+      "hora": "17:30:00",
+      "via": "WIFI_DIRECTO",
+      "historial": {
+        "-P1IEi3AL7aUbpUxlrkb": {
+          "CO": 912,
+          "PM2_5": 180,
+          "humedad": 49,
+          "last_update_server": 1789176766731,
+          "temperatura": 19.8,
+          "alarma_activa": true,
+          "origen_alarma": "CAUSA_NATURAL_SENSORES",
+          "descripcion": "Alarma activa por CAUSA NATURAL (Concentracion critica simultanea de Gas CO y Polvo PM2.5). Valores registrados: CO=912 ADC (Limite 500), PM2.5=180.0 ug/m3 (Limite 150), Temp=19.8 C, Hum=49%.",
+          "fecha": "11/11/2026",
+          "hora": "17:30:00",
+          "timestamp_server": 1789176766731
+        }
+      },
+      "registro_alarmas": {
+        "-P1IEi3AL7aUbpUxlrkb_alm": {
+          "CO": 912,
+          "PM2_5": 180,
+          "temperatura": 19.8,
+          "humedad": 49,
+          "fecha": "11/11/2026",
+          "hora": "17:30:00",
+          "origen": "CAUSA_NATURAL_SENSORES",
+          "descripcion": "Alarma activa por CAUSA NATURAL (Concentracion critica simultanea de Gas CO y Polvo PM2.5). Valores registrados: CO=912 ADC (Limite 500), PM2.5=180.0 ug/m3 (Limite 150), Temp=19.8 C, Hum=49%.",
+          "via": "WIFI_DIRECTO",
+          "timestamp_server": 1789176766731
+        }
+      },
+      "humedad": 49,
+      "last_update_server": 1789176766310,
+      "temperatura": 19.8
+    },
+    "device_38A839E81F84": {
+      "CO": 496,
+      "PM2_5": 4095,
+      "alarma_activa": true,
+      "origen_alarma": "CAUSA_NATURAL_SENSORES",
+      "descripcion_monitoreo": "Alarma activa por CAUSA NATURAL (Densidad critica de polvo/humo detectada por sensor Sharp PM2.5). Valores registrados: CO=496 ADC (Limite 500), PM2.5=4095.0 ug/m3 (Limite 150), Temp=24.5 C, Hum=38%.",
+      "fecha": "11/11/2026",
+      "hora": "17:31:00",
+      "via": "WIFI_DIRECTO",
+      "historial": {
+        "-OeEt1TIs5agHdPSndLW": {
+          "CO": 496,
+          "PM2_5": 4095,
+          "humedad": 38,
+          "latitud": 0,
+          "longitud": 0,
+          "temperatura": 24.5,
+          "alarma_activa": true,
+          "origen_alarma": "CAUSA_NATURAL_SENSORES",
+          "descripcion": "Alarma activa por CAUSA NATURAL (Densidad critica de polvo/humo detectada por sensor Sharp PM2.5). Valores registrados: CO=496 ADC (Limite 500), PM2.5=4095.0 ug/m3 (Limite 150), Temp=24.5 C, Hum=38%.",
+          "fecha": "11/11/2026",
+          "hora": "17:31:00",
+          "timestamp_server": 1763350685588
+        }
+      },
+      "registro_alarmas": {
+        "alm_1": {
+          "CO": 496,
+          "PM2_5": 4095,
+          "temperatura": 24.5,
+          "humedad": 38,
+          "fecha": "11/11/2026",
+          "hora": "17:31:00",
+          "origen": "CAUSA_NATURAL_SENSORES",
+          "descripcion": "Alarma activa por CAUSA NATURAL (Densidad critica de polvo/humo detectada por sensor Sharp PM2.5). Valores registrados: CO=496 ADC (Limite 500), PM2.5=4095.0 ug/m3 (Limite 150), Temp=24.5 C, Hum=38%.",
+          "via": "WIFI_DIRECTO",
+          "timestamp_server": 1763350685588
+        },
+        "alm_2": {
+          "CO": 310,
+          "PM2_5": 25,
+          "temperatura": 24.5,
+          "humedad": 38,
+          "fecha": "11/11/2026",
+          "hora": "17:31:30",
+          "origen": "ACTIVACION_MANUAL_USUARIO",
+          "descripcion": "Alarma activada MANUALMENTE. Detalle del usuario: Activacion manual preventiva por operador. Lecturas al activarse: Gas CO=310 ADC, PM2.5=25.0 ug/m3, Temp=24.5 C, Hum=38%.",
+          "via": "WIFI_DIRECTO",
+          "timestamp_server": 1763350715588
+        }
+      },
+      "humedad": 38,
+      "last_update_server": 1763350685307,
+      "latitud": -22.45,
+      "longitud": -68.92,
+      "name": "Sensor Fase 1",
+      "temperatura": 24.5,
+      "userEmail": "manuelcrisostomovega@gmail.com",
+      "userId": "manual_temp_uid_01"
+    },
+    "device_A4CB2F124B00": {
+      "CO": 4095,
+      "PM2_5": 300,
+      "alarma_activa": true,
+      "origen_alarma": "CAUSA_NATURAL_SENSORES",
+      "descripcion_monitoreo": "Alarma activa por CAUSA NATURAL (Concentracion critica simultanea de Gas CO y Polvo PM2.5). Valores registrados: CO=4095 ADC (Limite 500), PM2.5=300.0 ug/m3 (Limite 150), Temp=0.0 C, Hum=0%.",
+      "fecha": "11/11/2026",
+      "hora": "17:30:00",
+      "via": "WIFI_DIRECTO",
+      "historial": {
+        "-P0_A1uZDzjvLsKU3Tzp": {
+          "CO": 4095,
+          "PM2_5": 300,
+          "humedad": 0,
+          "temperatura": 0,
+          "alarma_activa": true,
+          "origen_alarma": "CAUSA_NATURAL_SENSORES",
+          "descripcion": "Alarma activa por CAUSA NATURAL (Concentracion critica simultanea de Gas CO y Polvo PM2.5). Valores registrados: CO=4095 ADC (Limite 500), PM2.5=300.0 ug/m3 (Limite 150), Temp=0.0 C, Hum=0%.",
+          "fecha": "11/11/2026",
+          "hora": "17:30:00",
+          "timestamp_server": 1788403789476
+        }
+      },
+      "registro_alarmas": {
+        "-P0_A1uZDzjvLsKU3Tzp_alm": {
+          "CO": 4095,
+          "PM2_5": 300,
+          "temperatura": 0,
+          "humedad": 0,
+          "fecha": "11/11/2026",
+          "hora": "17:30:00",
+          "origen": "CAUSA_NATURAL_SENSORES",
+          "descripcion": "Alarma activa por CAUSA NATURAL (Concentracion critica simultanea de Gas CO y Polvo PM2.5). Valores registrados: CO=4095 ADC (Limite 500), PM2.5=300.0 ug/m3 (Limite 150), Temp=0.0 C, Hum=0%.",
+          "via": "WIFI_DIRECTO",
+          "timestamp_server": 1788403789476
+        }
+      },
+      "humedad": 0,
+      "last_update_server": 1788403789068,
+      "temperatura": 0
+    }
+  },
+  "pagos": {
+    "PAGO-001": {
+      "estado": "Pagado",
+      "fechaPago": "2025-11-01",
+      "idContrato": "CONTRATO-001",
+      "monto": 15000,
+      "referencia": "REF-C001-NOV",
+      "userId": "avZLQk44v4evq0VsxO8QJDX8yRP2"
+    },
+    "PAGO-002": {
+      "estado": "Pendiente",
+      "fechaPago": "2025-12-01",
+      "idContrato": "CONTRATO-001",
+      "monto": 15000,
+      "referencia": "REF-C001-DIC",
+      "userId": "avZLQk44v4evq0VsxO8QJDX8yRP2"
+    },
+    "PAGO-003": {
+      "estado": "Pagado",
+      "fechaPago": "2025-11-15",
+      "idContrato": "CONTRATO-002",
+      "monto": 25000,
+      "referencia": "REF-C002-NOV",
+      "userId": "manual_temp_uid_01"
+    },
+    "PAGO-004": {
+      "estado": "Atrasado",
+      "fechaPago": "2025-11-20",
+      "idContrato": "CONTRATO-004",
+      "monto": 18000,
+      "referencia": "REF-C004-NOV",
+      "userId": "usr005"
+    }
+  },
+  "precarga": {
+    "usuarios_contratos": {
+      "admin1_minesafe_com": {
+        "alertaVencimiento": false,
+        "arriendo": {
+          "alertaVencimientoArriendo": true,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2024-01-01",
+          "fechaTerminoArriendo": "2025-01-01",
+          "idArriendo": "ARR-A001"
+        },
+        "cargo": "Administrador",
+        "codigoId": "AD-001",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-A001",
+          "nombreDispositivo": "DS-ADMIN-1",
+          "ultimaConexion": "2025-12-07 10:00:00"
+        },
+        "email": "admin1@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2024-01-01",
+        "fechaTermino": "2025-12-31",
+        "isActive": true,
+        "isAdmin": true,
+        "isSuperUser": false,
+        "nombre": "Carlos Ramírez",
+        "pagos_simulados": [
+          {
+            "estadoPago": "Pagado",
+            "fechaPago": "2024-11-25",
+            "idContrato": "ARR-A001",
+            "monto": 25000
+          },
+          {
+            "estadoPago": "Pendiente",
+            "fechaPago": "2025-01-25",
+            "idContrato": "ARR-A001",
+            "monto": 25000
+          },
+          {
+            "estadoPago": "Atrasado",
+            "fechaPago": "2024-09-01",
+            "idContrato": "ARR-A001",
+            "monto": 20000
+          }
+        ],
+        "tec": "TEC-001",
+        "telefono": "111111111"
+      },
+      "admin2_minesafe_com": {
+        "alertaVencimiento": false,
+        "arriendo": {
+          "alertaVencimientoArriendo": false,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2024-03-15",
+          "fechaTerminoArriendo": "2026-03-15",
+          "idArriendo": "ARR-A002"
+        },
+        "cargo": "Administrador",
+        "codigoId": "AD-002",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-A002",
+          "nombreDispositivo": "DS-ADMIN-2",
+          "ultimaConexion": "2025-12-07 12:30:00"
+        },
+        "email": "admin2@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2024-03-15",
+        "fechaTermino": "2025-09-15",
+        "isActive": true,
+        "isAdmin": true,
+        "isSuperUser": false,
+        "nombre": "Lucía Fernández",
+        "pagos_simulados": [
+          {
+            "estadoPago": "Pagado",
+            "fechaPago": "2024-10-15",
+            "idContrato": "ARR-A002",
+            "monto": 30000
+          },
+          {
+            "estadoPago": "Pagado",
+            "fechaPago": "2024-11-15",
+            "idContrato": "ARR-A002",
+            "monto": 30000
+          },
+          {
+            "estadoPago": "Pendiente",
+            "fechaPago": "2024-12-15",
+            "idContrato": "ARR-A002",
+            "monto": 30000
+          }
+        ],
+        "tec": "TEC-002",
+        "telefono": "222222222"
+      },
+      "user10_minesafe_com": {
+        "alertaVencimiento": false,
+        "arriendo": {
+          "alertaVencimientoArriendo": false,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2025-08-01",
+          "fechaTerminoArriendo": "2026-08-01",
+          "idArriendo": "ARR-U010"
+        },
+        "cargo": "Operario",
+        "codigoId": "OP-010",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M110",
+          "nombreDispositivo": "DS-MINE-110",
+          "ultimaConexion": "2025-12-07 13:45:00"
+        },
+        "email": "user10@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2025-08-01",
+        "fechaTermino": "2026-08-01",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Sofía Saltamontes",
+        "tec": "TEC-002",
+        "telefono": "1010101010"
+      },
+      "user11_minesafe_com": {
+        "alertaVencimiento": true,
+        "arriendo": {
+          "alertaVencimientoArriendo": true,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2024-11-01",
+          "fechaTerminoArriendo": "2025-05-01",
+          "idArriendo": "ARR-U011"
+        },
+        "cargo": "Operario",
+        "codigoId": "OP-011",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M111",
+          "nombreDispositivo": "DS-MINE-111",
+          "ultimaConexion": "2025-12-07 15:00:00"
+        },
+        "email": "user11@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2024-11-01",
+        "fechaTermino": "2025-11-01",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Pedro Pillos",
+        "tec": "TEC-003",
+        "telefono": "1111111111"
+      },
+      "user12_minesafe_com": {
+        "alertaVencimiento": false,
+        "cargo": "Operario",
+        "codigoId": "OP-012",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "N/A",
+          "nombreDispositivo": "N/A",
+          "ultimaConexion": "N/A"
+        },
+        "email": "user12@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Pendiente",
+        "fechaInicio": "2025-09-01",
+        "fechaTermino": "2026-09-01",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Ana Luminosa",
+        "tec": "TEC-004",
+        "telefono": "1212121212"
+      },
+      "user13_minesafe_com": {
+        "alertaVencimiento": true,
+        "arriendo": {
+          "alertaVencimientoArriendo": false,
+          "estadoArriendo": "Finalizado",
+          "fechaInicioArriendo": "2024-05-10",
+          "fechaTerminoArriendo": "2025-05-10",
+          "idArriendo": "ARR-U013"
+        },
+        "cargo": "Operario",
+        "codigoId": "OP-013",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M113",
+          "nombreDispositivo": "DS-MINE-113",
+          "ultimaConexion": "2025-12-07 07:00:00"
+        },
+        "email": "user13@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2024-05-10",
+        "fechaTermino": "2025-05-10",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Ramiro Saltos",
+        "tec": "TEC-005",
+        "telefono": "1313131313"
+      },
+      "user14_minesafe_com": {
+        "alertaVencimiento": false,
+        "arriendo": {
+          "alertaVencimientoArriendo": false,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2025-10-01",
+          "fechaTerminoArriendo": "2026-10-01",
+          "idArriendo": "ARR-U014"
+        },
+        "cargo": "Operario",
+        "codigoId": "OP-014",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M114",
+          "nombreDispositivo": "DS-MINE-114",
+          "ultimaConexion": "2025-12-07 16:30:00"
+        },
+        "email": "user14@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2025-10-01",
+        "fechaTermino": "2026-10-01",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Carolina Brillante",
+        "tec": "TEC-006",
+        "telefono": "1414141414"
+      },
+      "user15_minesafe_com": {
+        "alertaVencimiento": true,
+        "arriendo": {
+          "alertaVencimientoArriendo": true,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2024-07-20",
+          "fechaTerminoArriendo": "2025-01-20",
+          "idArriendo": "ARR-U015"
+        },
+        "cargo": "Operario",
+        "codigoId": "OP-015",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M115",
+          "nombreDispositivo": "DS-MINE-115",
+          "ultimaConexion": "2025-12-07 17:00:00"
+        },
+        "email": "user15@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2024-07-20",
+        "fechaTermino": "2025-07-20",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Mateo Alegre",
+        "tec": "TEC-007",
+        "telefono": "1515151515"
+      },
+      "user16_minesafe_com": {
+        "alertaVencimiento": false,
+        "arriendo": {
+          "alertaVencimientoArriendo": false,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2025-11-01",
+          "fechaTerminoArriendo": "2026-11-01",
+          "idArriendo": "ARR-U016"
+        },
+        "cargo": "Operario",
+        "codigoId": "OP-016",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M116",
+          "nombreDispositivo": "DS-MINE-116",
+          "ultimaConexion": "2025-12-07 18:00:00"
+        },
+        "email": "user16@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2025-11-01",
+        "fechaTermino": "2026-11-01",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Valentina Risueña",
+        "tec": "TEC-008",
+        "telefono": "1616161616"
+      },
+      "user17_minesafe_com": {
+        "alertaVencimiento": true,
+        "cargo": "Operario",
+        "codigoId": "OP-017",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "N/A",
+          "nombreDispositivo": "N/A",
+          "ultimaConexion": "N/A"
+        },
+        "email": "user17@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Inactivo",
+        "fechaInicio": "2024-09-01",
+        "fechaTermino": "2025-09-01",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Sebastián Travieso",
+        "tec": "TEC-009",
+        "telefono": "1717171717"
+      },
+      "user18_minesafe_com": {
+        "alertaVencimiento": true,
+        "arriendo": {
+          "alertaVencimientoArriendo": true,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2025-12-01",
+          "fechaTerminoArriendo": "2026-03-01",
+          "idArriendo": "ARR-U018"
+        },
+        "cargo": "Operario",
+        "codigoId": "OP-018",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M118",
+          "nombreDispositivo": "DS-MINE-118",
+          "ultimaConexion": "2025-12-07 19:30:00"
+        },
+        "email": "user18@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2025-12-01",
+        "fechaTermino": "2026-12-01",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Jimena Saltarina",
+        "tec": "TEC-010",
+        "telefono": "1818181818"
+      },
+      "user1_minesafe_com": {
+        "alertaVencimiento": true,
+        "arriendo": {
+          "alertaVencimientoArriendo": true,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2025-01-01",
+          "fechaTerminoArriendo": "2026-01-01",
+          "idArriendo": "ARR-U001"
+        },
+        "arriendos_secundarios": [
+          {
+            "alertaVencimientoArriendo": true,
+            "estadoArriendo": "Vencido",
+            "fechaInicioArriendo": "2024-11-01",
+            "fechaTerminoArriendo": "2024-12-01",
+            "idArriendo": "ARR-U001-2"
+          }
+        ],
+        "cargo": "Operario",
+        "codigoId": "OP-001",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M101",
+          "nombreDispositivo": "DS-MINE-101",
+          "ultimaConexion": "2025-12-07 09:00:00"
+        },
+        "email": "user1@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2025-01-01",
+        "fechaTermino": "2025-07-01",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Pepito Travieso",
+        "pagos_simulados": [
+          {
+            "estadoPago": "Pagado",
+            "fechaPago": "2024-12-10",
+            "idContrato": "ARR-U001",
+            "monto": 15000
+          },
+          {
+            "estadoPago": "Atrasado",
+            "fechaPago": "2024-11-05",
+            "idContrato": "ARR-U001-2",
+            "monto": 8000
+          }
+        ],
+        "tec": "TEC-003",
+        "telefono": "101010101"
+      },
+      "user2_minesafe_com": {
+        "alertaVencimiento": false,
+        "arriendo": {
+          "alertaVencimientoArriendo": true,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2025-02-10",
+          "fechaTerminoArriendo": "2025-08-10",
+          "idArriendo": "ARR-U002"
+        },
+        "arriendos_secundarios": [
+          {
+            "alertaVencimientoArriendo": false,
+            "estadoArriendo": "Activo",
+            "fechaInicioArriendo": "2025-10-01",
+            "fechaTerminoArriendo": "2026-04-01",
+            "idArriendo": "ARR-U002-2"
+          },
+          {
+            "alertaVencimientoArriendo": false,
+            "estadoArriendo": "Finalizado",
+            "fechaInicioArriendo": "2024-05-01",
+            "fechaTerminoArriendo": "2024-11-01",
+            "idArriendo": "ARR-U002-3"
+          }
+        ],
+        "cargo": "Operario",
+        "codigoId": "OP-002",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M102",
+          "nombreDispositivo": "DS-MINE-102",
+          "ultimaConexion": "2025-12-07 11:15:00"
+        },
+        "email": "user2@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2025-02-10",
+        "fechaTermino": "2026-02-10",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "María Chispita",
+        "pagos_simulados": [
+          {
+            "estadoPago": "Pagado",
+            "fechaPago": "2025-11-01",
+            "idContrato": "ARR-U002",
+            "monto": 18000
+          },
+          {
+            "estadoPago": "Pagado",
+            "fechaPago": "2025-10-05",
+            "idContrato": "ARR-U002-2",
+            "monto": 12000
+          },
+          {
+            "estadoPago": "Pendiente",
+            "fechaPago": "2025-12-05",
+            "idContrato": "ARR-U002-2",
+            "monto": 12000
+          },
+          {
+            "estadoPago": "Pagado",
+            "fechaPago": "2024-05-01",
+            "idContrato": "ARR-U002-3",
+            "monto": 10000
+          }
+        ],
+        "tec": "TEC-004",
+        "telefono": "202020202"
+      },
+      "user3_minesafe_com": {
+        "alertaVencimiento": false,
+        "cargo": "Operario",
+        "codigoId": "OP-003",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "N/A",
+          "nombreDispositivo": "N/A",
+          "ultimaConexion": "N/A"
+        },
+        "email": "user3@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Inactivo",
+        "fechaInicio": "2024-04-01",
+        "fechaTermino": "2025-04-01",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Juancho Risas",
+        "tec": "TEC-005",
+        "telefono": "303030303"
+      },
+      "user4_minesafe_com": {
+        "alertaVencimiento": true,
+        "arriendo": {
+          "alertaVencimientoArriendo": true,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2025-03-20",
+          "fechaTerminoArriendo": "2025-12-20",
+          "idArriendo": "ARR-U004"
+        },
+        "cargo": "Operario",
+        "codigoId": "OP-004",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M104",
+          "nombreDispositivo": "DS-MINE-104",
+          "ultimaConexion": "2025-12-07 14:00:00"
+        },
+        "email": "user4@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2025-03-20",
+        "fechaTermino": "2026-03-20",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Lola Saltarina",
+        "tec": "TEC-006",
+        "telefono": "404040404"
+      },
+      "user5_minesafe_com": {
+        "alertaVencimiento": false,
+        "arriendo": {
+          "alertaVencimientoArriendo": false,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2024-06-01",
+          "fechaTerminoArriendo": "2025-06-01",
+          "idArriendo": "ARR-U005"
+        },
+        "cargo": "Operario",
+        "codigoId": "OP-005",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M105",
+          "nombreDispositivo": "DS-MINE-105",
+          "ultimaConexion": "2025-12-06 20:00:00"
+        },
+        "email": "user5@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2024-06-01",
+        "fechaTermino": "2025-06-01",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Tomasel Rapido",
+        "tec": "TEC-007",
+        "telefono": "505050505"
+      },
+      "user6_minesafe_com": {
+        "alertaVencimiento": false,
+        "cargo": "Operario",
+        "codigoId": "OP-006",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M106",
+          "nombreDispositivo": "DS-MINE-106",
+          "ultimaConexion": "2025-12-07 08:30:00"
+        },
+        "email": "user6@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2025-05-15",
+        "fechaTermino": "2026-05-15",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Cecilia Sombrero",
+        "tec": "TEC-008",
+        "telefono": "606060606"
+      },
+      "user7_minesafe_com": {
+        "alertaVencimiento": true,
+        "arriendo": {
+          "alertaVencimientoArriendo": true,
+          "estadoArriendo": "Vencido",
+          "fechaInicioArriendo": "2024-10-25",
+          "fechaTerminoArriendo": "2025-10-25",
+          "idArriendo": "ARR-U007"
+        },
+        "cargo": "Operario",
+        "codigoId": "OP-007",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M107",
+          "nombreDispositivo": "DS-MINE-107",
+          "ultimaConexion": "2025-12-05 15:00:00"
+        },
+        "email": "user7@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Pendiente",
+        "fechaInicio": "2024-10-25",
+        "fechaTermino": "2025-10-25",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Hugo Bigotes",
+        "tec": "TEC-009",
+        "telefono": "707070707"
+      },
+      "user8_minesafe_com": {
+        "alertaVencimiento": false,
+        "arriendo": {
+          "alertaVencimientoArriendo": false,
+          "estadoArriendo": "Vigente",
+          "fechaInicioArriendo": "2025-07-01",
+          "fechaTerminoArriendo": "2026-07-01",
+          "idArriendo": "ARR-U008"
+        },
+        "cargo": "Operario",
+        "codigoId": "OP-008",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M108",
+          "nombreDispositivo": "DS-MINE-108",
+          "ultimaConexion": "2025-12-07 09:30:00"
+        },
+        "email": "user8@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2025-07-01",
+        "fechaTermino": "2026-07-01",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Estefanía Rayo",
+        "tec": "TEC-010",
+        "telefono": "808080808"
+      },
+      "user9_minesafe_com": {
+        "alertaVencimiento": true,
+        "arriendo": {
+          "alertaVencimientoArriendo": true,
+          "estadoArriendo": "Finalizado",
+          "fechaInicioArriendo": "2024-02-01",
+          "fechaTerminoArriendo": "2025-02-01",
+          "idArriendo": "ARR-U009"
+        },
+        "cargo": "Operario",
+        "codigoId": "OP-009",
+        "contactos": "998877665, 991122334",
+        "dispositivo": {
+          "idDispositivo": "DS-M109",
+          "nombreDispositivo": "DS-MINE-109",
+          "ultimaConexion": "2025-01-01 10:00:00"
+        },
+        "email": "user9@minesafe.com",
+        "empresa": "Minesafe",
+        "estado": "Activo",
+        "fechaInicio": "2024-02-01",
+        "fechaTermino": "2025-02-01",
+        "isActive": true,
+        "isAdmin": false,
+        "isSuperUser": false,
+        "nombre": "Diego Tornado",
+        "tec": "TEC-001",
+        "telefono": "909090909"
+      }
+    }
+  },
+  "usuarios": {
+    "S427GEJa97Nl6B1Gyo3vnQtpSqV2": {
+      "deviceId": "",
+      "email": "white.wolf260501@gmail.com",
+      "isActive": true,
+      "isAdmin": false,
+      "nombre": "PEPE LOTA",
+      "telefono": "964180555",
+      "tipoUsuario": "admin",
+      "updatedAt": "2025-11-24T00:00:00.000Z"
+    },
+    "avZLQk44v4evq0VsxO8QJDX8yRP2": {
+      "deviceId": "device_A4CB2F124B00",
+      "direccion": "Mi casa",
+      "email": "geencuve@gmail.com",
+      "geoMina": "Mina San José",
+      "isActive": false,
+      "isAdmin": false,
+      "isSuperUser": false,
+      "nombre": "Gerardo Cuellar Velasquez",
+      "telefono": "+56949464309",
+      "tipoMina": "subterranea",
+      "updatedAt": "2025-11-24T00:00:00.000Z"
+    },
+    "manual_temp_uid_01": {
+      "comuna": "CALAMA",
+      "deviceId": "device_38A839E81F84",
+      "direccion": "los maitenes 1168",
+      "email": "manuelcrisostomovega@gmail.com",
+      "geoMina": "Mina Chuquicamata",
+      "isActive": true,
+      "isAdmin": true,
+      "isSuperUser": true,
+      "nombre": "Manuel Crisostomo",
+      "pais": "Chile",
+      "region": "Antofagasta",
+      "telefono": "+56964180557",
+      "tipoMina": "tajo_abierto",
+      "updatedAt": 1765766000935
+    },
+    "usr001": {
+      "email": "carlos.munoz@example.com",
+      "isSuperUser": false,
+      "nombre": "Carlos Muñoz",
+      "tipoUsuario": "operador",
+      "uid": "usr001"
+    },
+    "usr002": {
+      "email": "maria.torres@example.com",
+      "isSuperUser": false,
+      "nombre": "María Torres",
+      "tipoUsuario": "admin",
+      "uid": "usr002"
+    },
+    "usr003": {
+      "email": "felipe.ramirez@example.com",
+      "isSuperUser": false,
+      "nombre": "Felipe Ramírez",
+      "tipoUsuario": "operador",
+      "uid": "usr003"
+    },
+    "usr004": {
+      "email": "ignacia.soto@example.com",
+      "isSuperUser": false,
+      "nombre": "Ignacia Soto",
+      "tipoUsuario": "supervisor",
+      "uid": "usr004"
+    },
+    "usr005": {
+      "email": "tomas.silva@example.com",
+      "isSuperUser": false,
+      "nombre": "Tomás Silva",
+      "tipoUsuario": "operador",
+      "uid": "usr005"
+    },
+    "usr006": {
+      "email": "constanza.reyes@example.com",
+      "isSuperUser": false,
+      "nombre": "Constanza Reyes",
+      "tipoUsuario": "admin",
+      "uid": "usr006"
+    },
+    "usr007": {
+      "email": "matias.herrera@example.com",
+      "isSuperUser": false,
+      "nombre": "Matías Herrera",
+      "tipoUsuario": "técnico",
+      "uid": "usr007"
+    },
+    "usr008": {
+      "email": "valentina.paredes@example.com",
+      "isSuperUser": false,
+      "nombre": "Valentina Paredes",
+      "tipoUsuario": "operador",
+      "uid": "usr008"
+    },
+    "usr009": {
+      "email": "sebastian.rojas@example.com",
+      "isSuperUser": false,
+      "nombre": "Sebastián Rojas",
+      "tipoUsuario": "supervisor",
+      "uid": "usr009"
+    },
+    "usr010": {
+      "email": "camila.bravo@example.com",
+      "isSuperUser": false,
+      "nombre": "Camila Bravo",
+      "tipoUsuario": "operador",
+      "uid": "usr010"
+    },
+    "usr011": {
+      "email": "daniel.caceres@example.com",
+      "isSuperUser": false,
+      "nombre": "Daniel Cáceres",
+      "tipoUsuario": "admin",
+      "uid": "usr011"
+    },
+    "usr012": {
+      "email": "antonia.lagos@example.com",
+      "isSuperUser": false,
+      "nombre": "Antonia Lagos",
+      "tipoUsuario": "operador",
+      "uid": "usr012"
+    },
+    "usr013": {
+      "email": "joaquin.vidal@example.com",
+      "isSuperUser": false,
+      "nombre": "Joaquín Vidal",
+      "tipoUsuario": "técnico",
+      "uid": "usr013"
+    },
+    "usr014": {
+      "email": "fernanda.morales@example.com",
+      "isSuperUser": false,
+      "nombre": "Fernanda Morales",
+      "tipoUsuario": "operador",
+      "uid": "usr014"
+    },
+    "usr015": {
+      "email": "vicente.navarro@example.com",
+      "isSuperUser": false,
+      "nombre": "Vicente Navarro",
+      "tipoUsuario": "supervisor",
+      "uid": "usr015"
+    },
+    "usr016": {
+      "email": "gabriela.pena@example.com",
+      "isSuperUser": false,
+      "nombre": "Gabriela Peña",
+      "tipoUsuario": "operador",
+      "uid": "usr016"
+    },
+    "usr017": {
+      "email": "diego.andrade@example.com",
+      "isSuperUser": false,
+      "nombre": "Diego Andrade",
+      "tipoUsuario": "técnico",
+      "uid": "usr017"
+    },
+    "usr018": {
+      "email": "josefa.riquelme@example.com",
+      "isSuperUser": false,
+      "nombre": "Josefa Riquelme",
+      "tipoUsuario": "operador",
+      "uid": "usr018"
+    },
+    "usr019": {
+      "email": "benjamin.cortes@example.com",
+      "isSuperUser": false,
+      "nombre": "Benjamín Cortés",
+      "tipoUsuario": "admin",
+      "uid": "usr019"
+    },
+    "usr020": {
+      "email": "paula.villalobos@example.com",
+      "isSuperUser": false,
+      "nombre": "Paula Villalobos",
+      "tipoUsuario": "operador",
+      "uid": "usr020"
+    }
+  }
+}
+```[cite: 5]
+
+¿Te gustaría que te entregue también el código para tu frontend web o móvil que permita filtrar y descargar este nodo `registro_alarmas` en Excel o PDF?
