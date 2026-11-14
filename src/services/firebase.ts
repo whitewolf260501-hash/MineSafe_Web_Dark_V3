@@ -50,23 +50,33 @@ import {
 
 export const USER_RTDB_URL = "https://minefase-fc5f5-default-rtdb.firebaseio.com/";
 
-// Initialize Firebase App
-const appConfig = {
-  ...firebaseConfig,
+const minefaseConfig = {
+  apiKey: "AIzaSyA14qbuEIlTtln7A0U5xJCzFtj9jIxDHCg",
+  authDomain: "minefase-fc5f5.firebaseapp.com",
   databaseURL: USER_RTDB_URL,
+  projectId: "minefase-fc5f5",
+  storageBucket: "minefase-fc5f5.firebasestorage.app",
+  messagingSenderId: "766582128927",
+  appId: "1:766582128927:web:1cf296e3c84874221bb02a",
+  measurementId: "G-DP6YY8GJWE"
 };
 
-const app = !getApps().length ? initializeApp(appConfig) : getApp();
+// Primary Firebase App connected to user's minefase-fc5f5 project (Auth + RTDB)
+const minefaseApp = getApps().find((a) => a.name === 'minefase-primary')
+  || initializeApp(minefaseConfig, 'minefase-primary');
 
-// Firebase Realtime Database connected to user's RTDB
-export const rtdb: Database = getDatabase(app, USER_RTDB_URL);
+// Default AI Studio Firestore app
+const appletApp = getApps().find((a) => a.name === '[DEFAULT]')
+  || initializeApp(firebaseConfig);
+
+// Firebase Realtime Database & Auth connected strictly to minefase-fc5f5
+export const rtdb: Database = getDatabase(minefaseApp, USER_RTDB_URL);
+export const auth = getAuth(minefaseApp);
 
 // Firestore instance
 export const db: Firestore = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
-
-export const auth = getAuth(app);
+  ? getFirestore(appletApp, firebaseConfig.firestoreDatabaseId)
+  : getFirestore(appletApp);
 
 // Connection test for user's Realtime Database
 export async function testConnection(): Promise<boolean> {
@@ -200,7 +210,7 @@ export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevic
 
 export const PRIMARY_SUPERADMIN_EMAIL = 'manuelcrisostomovega@gmail.com';
 export const PRIMARY_SUPERADMIN_UID = 'manual_temp_uid_01';
-export const FIREBASE_PROJECT_ID = firebaseConfig.projectId;
+export const FIREBASE_PROJECT_ID = minefaseConfig.projectId;
 
 export class FirebaseAuthActionError extends Error {
   code: string;
@@ -372,16 +382,16 @@ export async function loginWithGoogleFirebaseAuth(rememberMe: boolean = true): P
     const credential = await signInWithPopup(auth, provider);
     const fbUser = credential.user;
 
-    // Registrar ficha básica en RTDB si es la primera vez que ingresa por Google
+    // Registrar ficha básica en RTDB si es la primera vez que ingresa por Google (solo si no es el SuperAdmin canónico con nodo manual_temp_uid_01)
     const byUidSnap = await get(ref(rtdb, `usuarios/${fbUser.uid}`)).catch(() => null);
     const isCanonicalSuper = (fbUser.email || '').trim().toLowerCase() === PRIMARY_SUPERADMIN_EMAIL;
-    if (!byUidSnap || !byUidSnap.exists()) {
+    if ((!byUidSnap || !byUidSnap.exists()) && !isCanonicalSuper) {
       await set(ref(rtdb, `usuarios/${fbUser.uid}`), {
         nombre: fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0] : 'Usuario'),
         email: fbUser.email || '',
-        isAdmin: isCanonicalSuper,
-        isSuperUser: isCanonicalSuper,
-        tipoUsuario: isCanonicalSuper ? 'superadmin' : 'operador',
+        isAdmin: false,
+        isSuperUser: false,
+        tipoUsuario: 'operador',
         isActive: true,
         telefono: 'No registrado',
         cargo: 'Turno Continuo A',
@@ -418,7 +428,7 @@ export async function registerWithFirebaseAuth(
     const safeRole: UserRole = isCanonicalSuper ? 'superadmin' : 'operador';
 
     const newUser: UserProfile = {
-      id: uid,
+      id: isCanonicalSuper ? PRIMARY_SUPERADMIN_UID : uid,
       name: cleanName,
       email: cleanEmail,
       role: safeRole,
@@ -430,22 +440,24 @@ export async function registerWithFirebaseAuth(
       status: 'activo',
       lastLogin: 'En línea (Firebase Auth)',
       assignedSector: 'Faena Minera Central',
-      assignedDeviceCode: '',
+      assignedDeviceCode: isCanonicalSuper ? 'device_38A839E81F84' : '',
     };
 
-    await set(ref(rtdb, `usuarios/${uid}`), {
-      nombre: newUser.name,
-      email: newUser.email,
-      isAdmin: safeRole === 'superadmin',
-      isSuperUser: safeRole === 'superadmin',
-      tipoUsuario: safeRole,
-      isActive: true,
-      telefono: newUser.rut,
-      cargo: newUser.shift,
-      geoMina: newUser.assignedSector,
-      deviceId: '',
-      updatedAt: new Date().toISOString(),
-    }).catch(() => {});
+    if (!isCanonicalSuper) {
+      await set(ref(rtdb, `usuarios/${uid}`), {
+        nombre: newUser.name,
+        email: newUser.email,
+        isAdmin: false,
+        isSuperUser: false,
+        tipoUsuario: 'operador',
+        isActive: true,
+        telefono: newUser.rut,
+        cargo: newUser.shift,
+        geoMina: newUser.assignedSector,
+        deviceId: '',
+        updatedAt: new Date().toISOString(),
+      }).catch(() => {});
+    }
 
     return newUser;
   } catch (err: any) {
