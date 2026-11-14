@@ -27,7 +27,8 @@
       // Solo usuarios autenticados pueden consultar perfiles de la faena
       ".read": true,
       "$userId": {
-        ".write": "auth != null && (auth.uid === $userId || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true)"
+        ".write": "auth != null && (auth.uid === $userId || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || (root.child('usuarios/' + auth.uid + '/isAdmin').val() === true && data.child('isSuperUser').val() !== true && data.child('tipoUsuario').val() !== 'superadmin'))",
+        ".validate": "(!newData.child('isSuperUser').exists() || newData.child('isSuperUser').val() === false || $userId === 'manual_temp_uid_01') && (newData.child('tipoUsuario').val() !== 'superadmin' || $userId === 'manual_temp_uid_01')"
       }
     },
     "contratos": {

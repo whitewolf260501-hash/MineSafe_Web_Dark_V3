@@ -14,7 +14,9 @@ import {
   Lock,
   Mail,
   Clock,
-  Radio
+  Radio,
+  ShieldCheck,
+  AlertCircle
 } from 'lucide-react';
 import { UserProfile, UserRole } from '../types';
 import { soundAlert } from '../services/audioAlert';
@@ -37,6 +39,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [feedbackToast, setFeedbackToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // New user form state
   const [newName, setNewName] = useState('');
@@ -48,6 +51,11 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
   const isSuperAdmin = currentUser.role === 'superadmin';
   const isAdminOrSuper = currentUser.role === 'superadmin' || currentUser.role === 'admin';
 
+  const showToast = (type: 'success' | 'error', text: string) => {
+    setFeedbackToast({ type, text });
+    setTimeout(() => setFeedbackToast(null), 4000);
+  };
+
   const filteredUsers = usersList.filter((u) => {
     const matchesSearch = 
       u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -57,9 +65,46 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
     return matchesSearch && matchesRole;
   });
 
+  const handleRoleSelectChange = (targetUser: UserProfile, nextRole: UserRole) => {
+    if (targetUser.role === 'superadmin') {
+      soundAlert.playFeedbackBeep();
+      showToast('error', 'Acción bloqueada: Un Administrador no puede quitarle permisos al único SuperAdministrador.');
+      return;
+    }
+    if (nextRole === 'superadmin') {
+      soundAlert.playFeedbackBeep();
+      showToast('error', 'Acción bloqueada: Solo existe un único SuperAdministrador en toda la plataforma.');
+      return;
+    }
+
+    onUpdateUserRole(targetUser.id, nextRole);
+    showToast(
+      'success',
+      nextRole === 'admin'
+        ? `Permisos de Administrador otorgados a ${targetUser.name}.`
+        : `Rol actualizado a Operador (Usuario Normal) para ${targetUser.name}.`
+    );
+  };
+
+  const handleStatusToggleClick = (targetUser: UserProfile) => {
+    if (targetUser.role === 'superadmin') {
+      soundAlert.playFeedbackBeep();
+      showToast('error', 'Acción bloqueada: El único SuperAdministrador no puede ser desactivado.');
+      return;
+    }
+    onToggleUserStatus(targetUser.id);
+    showToast(
+      'success',
+      `Cuenta de ${targetUser.name} ${targetUser.status === 'activo' ? 'desactivada' : 'activada'}.`
+    );
+  };
+
   const handleCreateUser = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName || !newEmail) return;
+
+    // Garantizar que nunca se cree un segundo superadmin
+    const safeRole: UserRole = newRole === 'superadmin' ? 'admin' : newRole;
 
     const roleLabels: Record<UserRole, string> = {
       superadmin: 'Super Administrador de Seguridad Minera',
@@ -71,8 +116,8 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
       id: `usr-${Date.now()}`,
       name: newName,
       email: newEmail,
-      role: newRole,
-      roleLabel: roleLabels[newRole],
+      role: safeRole,
+      roleLabel: roleLabels[safeRole],
       rut: newRut || '18.123.456-7',
       shift: newShift,
       status: 'activo',
@@ -81,10 +126,12 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
 
     onAddUser(created);
     soundAlert.playFeedbackBeep();
+    showToast('success', `Usuario ${created.name} creado con rol ${safeRole === 'admin' ? 'Administrador' : 'Operador'}.`);
     setShowAddModal(false);
     setNewName('');
     setNewEmail('');
     setNewRut('');
+    setNewRole('operador');
   };
 
   const getRoleBadge = (role: UserRole) => {
@@ -93,7 +140,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
         return (
           <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-300 bg-purple-950 px-2 py-0.5 rounded border border-purple-800">
             <Crown className="w-3.5 h-3.5 text-purple-400" />
-            SuperAdmin
+            SuperAdmin Único
           </span>
         );
       case 'admin':
@@ -125,7 +172,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
               Gestión de Usuarios y Roles (RBAC)
             </h1>
             <p className="text-xs text-slate-400 mt-1">
-              Administración de cuentas con control de permisos para <span className="text-purple-400 font-semibold">SuperAdmin</span>, <span className="text-cyan-400 font-semibold">Admin</span> y <span className="text-amber-400 font-semibold">Usuario Normal</span>.
+              Administración de cuentas con <span className="text-purple-400 font-semibold">1 Único SuperAdmin Protegido</span>, <span className="text-cyan-400 font-semibold">Administradores</span> y <span className="text-amber-400 font-semibold">Usuarios Normales</span>.
             </p>
           </div>
 
@@ -140,16 +187,42 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
           )}
         </div>
 
+        {/* Feedback Toast */}
+        {feedbackToast && (
+          <div className={`mb-4 p-3 rounded-xl border text-xs font-semibold flex items-center justify-between animate-in fade-in ${
+            feedbackToast.type === 'error'
+              ? 'bg-rose-950/80 border-rose-700 text-rose-200'
+              : 'bg-emerald-950/80 border-emerald-700 text-emerald-200'
+          }`}>
+            <div className="flex items-center gap-2">
+              {feedbackToast.type === 'error' ? (
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              ) : (
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              )}
+              <span>{feedbackToast.text}</span>
+            </div>
+            <button onClick={() => setFeedbackToast(null)} className="text-[10px] underline opacity-80 hover:opacity-100">
+              Cerrar
+            </button>
+          </div>
+        )}
+
         {/* Roles Permission Matrix Card */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4 bg-slate-950/70 rounded-xl border border-slate-800 text-xs">
           
           <div className="p-3 bg-purple-950/20 border border-purple-900/40 rounded-lg space-y-1.5">
-            <div className="flex items-center gap-1.5 text-purple-300 font-bold">
-              <Crown className="w-4 h-4" />
-              Super Administrador (SuperAdmin)
+            <div className="flex items-center justify-between gap-1.5 text-purple-300 font-bold">
+              <span className="flex items-center gap-1.5">
+                <Crown className="w-4 h-4" />
+                Super Administrador
+              </span>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-950 border border-purple-700 text-purple-200">
+                1 Único
+              </span>
             </div>
             <p className="text-slate-400 text-[11px]">
-              Acceso total al sistema: gestión de usuarios, auditorías, creación de faenas, control de contratos de arriendo y configuración de umbrales críticos.
+              Autoridad máxima única e intransferible: otorga permisos de Administrador a los usuarios. Protegido contra cambios o revocación por parte de cualquier Admin.
             </p>
           </div>
 
@@ -159,7 +232,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
               Administrador / Prevencionista
             </div>
             <p className="text-slate-400 text-[11px]">
-              Gestión operacional: monitoreo de sensores, reconocimiento y resolución de alertas, activación de evacuación y asignación de detectores a cuadrillas.
+              Gestión operacional: monitoreo, umbrales, arriendos y gestión de operadores. No puede quitarle permisos ni desactivar al SuperAdministrador.
             </p>
           </div>
 
@@ -169,7 +242,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
               Usuario Normal / Operador
             </div>
             <p className="text-slate-400 text-[11px]">
-              Acceso operativo: consulta en tiempo real de su sector asignado, telemetría de su detector portátil personal y lectura de avisos de seguridad.
+              Acceso operativo asignado por defecto en todo registro nuevo: consulta en tiempo real de su sector y telemetría personal.
             </p>
           </div>
 
@@ -196,7 +269,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
             className="px-3 py-1.5 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500"
           >
             <option value="all">Todos los Roles</option>
-            <option value="superadmin">Solo SuperAdmins</option>
+            <option value="superadmin">SuperAdmin Único</option>
             <option value="admin">Solo Administradores</option>
             <option value="operador">Solo Usuarios Normales</option>
           </select>
@@ -219,62 +292,81 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80">
-              {filteredUsers.map((user) => (
-                <tr key={user.id} className="hover:bg-slate-800/40 transition-colors">
-                  <td className="px-4 py-3.5">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800 flex items-center justify-center font-bold text-xs">
-                        {user.name.charAt(0)}
+              {filteredUsers.map((user) => {
+                const isTargetSuperAdmin = user.role === 'superadmin';
+                const isCurrentSession = user.id === currentUser.id;
+                const canModifyTarget = isAdminOrSuper && !isCurrentSession && !isTargetSuperAdmin;
+
+                return (
+                  <tr key={user.id} className="hover:bg-slate-800/40 transition-colors">
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs border ${
+                          isTargetSuperAdmin
+                            ? 'bg-purple-950 text-purple-300 border-purple-700'
+                            : 'bg-cyan-950 text-cyan-300 border-cyan-800'
+                        }`}>
+                          {user.name.charAt(0)}
+                        </div>
+                        <div>
+                          <span className="font-semibold text-white block">{user.name}</span>
+                          <span className="text-[10px] text-slate-400">{user.roleLabel}</span>
+                        </div>
                       </div>
-                      <div>
-                        <span className="font-semibold text-white block">{user.name}</span>
-                        <span className="text-[10px] text-slate-400">{user.roleLabel}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3.5 font-mono text-slate-300">{user.email}</td>
-                  <td className="px-4 py-3.5 font-mono text-slate-400">{user.rut}</td>
-                  <td className="px-4 py-3.5">{getRoleBadge(user.role)}</td>
-                  <td className="px-4 py-3.5 text-slate-300">
-                    <div>{user.shift}</div>
-                    {user.assignedSector && (
-                      <div className="text-[10px] text-cyan-400 font-medium">{user.assignedSector}</div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                      user.status === 'activo' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-900 text-slate-500 border border-slate-800'
-                    }`}>
-                      {user.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    {(isSuperAdmin || currentUser.role === 'admin') && user.id !== currentUser.id ? (
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={user.role}
-                          onChange={(e) => onUpdateUserRole(user.id, e.target.value as UserRole)}
-                          className="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-[11px] text-cyan-200 font-medium focus:border-cyan-500"
-                        >
-                          {isSuperAdmin && <option value="superadmin">SuperAdmin</option>}
-                          <option value="admin">Admin (Prevencionista)</option>
-                          <option value="operador">Operador (Normal)</option>
-                        </select>
-                        <button
-                          onClick={() => onToggleUserStatus(user.id)}
-                          className="text-[11px] text-slate-400 hover:text-white underline"
-                        >
-                          {user.status === 'activo' ? 'Desactivar' : 'Activar'}
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-slate-500 text-[11px]">
-                        {user.id === currentUser.id ? 'Sesión actual' : 'Solo lectura'}
+                    </td>
+                    <td className="px-4 py-3.5 font-mono text-slate-300">{user.email}</td>
+                    <td className="px-4 py-3.5 font-mono text-slate-400">{user.rut}</td>
+                    <td className="px-4 py-3.5">{getRoleBadge(user.role)}</td>
+                    <td className="px-4 py-3.5 text-slate-300">
+                      <div>{user.shift}</div>
+                      {user.assignedSector && (
+                        <div className="text-[10px] text-cyan-400 font-medium">{user.assignedSector}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        user.status === 'activo' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-900 text-slate-500 border border-slate-800'
+                      }`}>
+                        {user.status}
                       </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      {isTargetSuperAdmin ? (
+                        <span
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-950/70 border border-purple-700/70 text-purple-300 text-[11px] font-semibold"
+                          title="El único SuperAdministrador está protegido; ningún Admin puede quitarle permisos ni desactivarlo."
+                        >
+                          <Lock className="w-3 h-3 text-purple-400" />
+                          <span>{isCurrentSession ? 'Sesión actual (Protegida)' : 'SuperAdmin Protegido'}</span>
+                        </span>
+                      ) : canModifyTarget ? (
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={user.role}
+                            onChange={(e) => handleRoleSelectChange(user, e.target.value as UserRole)}
+                            aria-label={`Cambiar rol de ${user.name}`}
+                            className="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-[11px] text-cyan-200 font-medium focus:border-cyan-500"
+                          >
+                            <option value="admin">Admin (Prevencionista)</option>
+                            <option value="operador">Operador (Normal)</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => handleStatusToggleClick(user)}
+                            className="text-[11px] text-slate-400 hover:text-white underline"
+                          >
+                            {user.status === 'activo' ? 'Desactivar' : 'Activar'}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-slate-500 text-[11px]">
+                          {isCurrentSession ? 'Sesión actual' : 'Solo lectura'}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -339,9 +431,15 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
                   >
                     <option value="operador">Usuario Normal (Operador)</option>
                     <option value="admin">Administrador (Prevencionista)</option>
-                    {isSuperAdmin && <option value="superadmin">Super Administrador</option>}
                   </select>
                 </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-purple-950/30 border border-purple-800/40 text-[11px] text-purple-200/90 flex items-center gap-2">
+                <Crown className="w-4 h-4 text-purple-400 shrink-0" />
+                <span>
+                  Solo existe <strong>1 SuperAdministrador</strong> en toda la plataforma. Puedes asignar rol de <strong>Operador</strong> o <strong>Administrador</strong>.
+                </span>
               </div>
 
               <div>

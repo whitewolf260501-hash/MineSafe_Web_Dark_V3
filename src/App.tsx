@@ -123,7 +123,13 @@ export default function App() {
           setCurrentUser((prev) => {
             if (!prev) return null;
             const updated = remoteUsers.find(u => u.id === prev.id || u.email.toLowerCase() === prev.email.toLowerCase());
-            return updated || prev;
+            if (updated) {
+              try {
+                localStorage.setItem('minesafe_active_user', JSON.stringify(updated));
+              } catch { /* ignore */ }
+              return updated;
+            }
+            return prev;
           });
         }
       });
@@ -588,11 +594,40 @@ export default function App() {
 
   // User Management Handlers
   const handleAddUser = useCallback((newUser: UserProfile) => {
-    setUsersList((prev) => [newUser, ...prev]);
-    addUserToRTDB(newUser);
+    // Regla: Solo existe un único SuperAdmin en toda la plataforma
+    const safeRole: UserRole = newUser.role === 'superadmin' ? 'admin' : newUser.role;
+    const safeUser: UserProfile = {
+      ...newUser,
+      role: safeRole,
+      roleLabel:
+        safeRole === 'admin'
+          ? 'Administrador / Prevencionista Sernageomin'
+          : 'Usuario Normal / Operador de Faena',
+    };
+    setUsersList((prev) => [safeUser, ...prev]);
+    addUserToRTDB(safeUser);
   }, []);
 
   const handleUpdateUserRole = useCallback((userId: string, newRole: UserRole) => {
+    if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+      return;
+    }
+
+    const targetUser = usersList.find((u) => u.id === userId);
+    if (!targetUser) return;
+
+    // Regla 1: Ningún Admin (ni otro usuario) puede quitarle permisos o cambiar el rol del SuperAdmin
+    if (targetUser.role === 'superadmin') {
+      console.warn('Acción bloqueada: No se pueden revocar ni modificar los permisos del único SuperAdministrador.');
+      return;
+    }
+
+    // Regla 2: Solo puede existir un único SuperAdmin en toda la plataforma
+    if (newRole === 'superadmin') {
+      console.warn('Acción bloqueada: Solo existe un único SuperAdministrador en toda la plataforma.');
+      return;
+    }
+
     soundAlert.playFeedbackBeep();
     const roleLabels: Record<UserRole, string> = {
       superadmin: 'Super Administrador de Seguridad Minera',
@@ -616,13 +651,35 @@ export default function App() {
       }) : null);
     }
 
-    updateUserInRTDB(userId, { role: newRole, roleLabel: roleLabels[newRole] });
-  }, [currentUser]);
+    updateUserInRTDB(
+      userId,
+      {
+        name: targetUser.name,
+        email: targetUser.email,
+        rut: targetUser.rut,
+        role: newRole,
+        roleLabel: roleLabels[newRole],
+      },
+      currentUser
+    );
+  }, [currentUser, usersList]);
 
   const handleToggleUserStatus = useCallback((userId: string) => {
-    soundAlert.playFeedbackBeep();
+    if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+      return;
+    }
+
     const targetUser = usersList.find(u => u.id === userId);
-    const nextStatus = targetUser?.status === 'activo' ? 'inactivo' : 'activo';
+    if (!targetUser) return;
+
+    // Protección: Un admin no puede desactivar ni quitar acceso al único SuperAdmin
+    if (targetUser.role === 'superadmin') {
+      console.warn('Acción bloqueada: No se puede desactivar la cuenta del único SuperAdministrador.');
+      return;
+    }
+
+    soundAlert.playFeedbackBeep();
+    const nextStatus = targetUser.status === 'activo' ? 'inactivo' : 'activo';
 
     setUsersList((prev) =>
       prev.map((u) =>
@@ -632,8 +689,16 @@ export default function App() {
       )
     );
 
-    updateUserInRTDB(userId, { status: nextStatus });
-  }, [usersList]);
+    updateUserInRTDB(
+      userId,
+      {
+        name: targetUser.name,
+        email: targetUser.email,
+        status: nextStatus,
+      },
+      currentUser
+    );
+  }, [currentUser, usersList]);
 
   const handleLogin = useCallback((user: UserProfile) => {
     setCurrentUser(user);

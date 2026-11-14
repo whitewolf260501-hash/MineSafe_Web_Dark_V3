@@ -72,8 +72,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     const pass = inputPass.trim();
     if (!pass) return false;
 
-    // SuperAdmin (Manuel Crisostomo)
-    if (targetUser.role === 'superadmin' || targetUser.email.includes('manuelcrisostomo')) {
+    // SuperAdmin (Manuel Crisostomo - Único en la plataforma)
+    if (targetUser.role === 'superadmin' || targetUser.email.toLowerCase() === 'manuelcrisostomovega@gmail.com') {
       const valid = ['admin123', 'minesafe2025', '123456', 'superadmin', 'manuel2025', 'admin'];
       return valid.includes(pass) || pass.length >= 6;
     }
@@ -146,20 +146,20 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         return;
       }
 
-      const isSuper = cleanEmail.includes('manuel') || cleanEmail.includes('crisostomo');
-      const isAdmin = isSuper || cleanEmail.includes('admin') || cleanEmail.includes('prevencion');
+      // Solo la cuenta canónica única puede acceder como superadmin; cualquier otro correo nuevo inicia como operador
+      const isCanonicalSuper = cleanEmail === 'manuelcrisostomovega@gmail.com';
       const customUser: UserProfile = {
-        id: `usr-${Date.now()}`,
-        name: cleanEmail.split('@')[0].toUpperCase(),
+        id: isCanonicalSuper ? 'manual_temp_uid_01' : `usr-${Date.now()}`,
+        name: isCanonicalSuper ? 'Manuel Crisostomo' : cleanEmail.split('@')[0].toUpperCase(),
         email: cleanEmail,
-        role: isSuper ? 'superadmin' : isAdmin ? 'admin' : 'operador',
-        roleLabel: isSuper ? 'Super Administrador' : isAdmin ? 'Administrador' : 'Usuario Normal / Operador',
+        role: isCanonicalSuper ? 'superadmin' : 'operador',
+        roleLabel: isCanonicalSuper ? 'Super Administrador' : 'Usuario Normal / Operador',
         rut: '18.921.432-5',
         shift: 'Turno A',
         status: 'activo',
         lastLogin: 'Ahora',
         assignedSector: 'Faena Minera Central',
-        assignedDeviceCode: 'MS-PORT-01',
+        assignedDeviceCode: isCanonicalSuper ? 'device_38A839E81F84' : 'MS-PORT-01',
       };
       onLogin(customUser);
       soundAlert.playFeedbackBeep();

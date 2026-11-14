@@ -165,8 +165,15 @@ export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevic
   };
 }
 
+export const PRIMARY_SUPERADMIN_EMAIL = 'manuelcrisostomovega@gmail.com';
+export const PRIMARY_SUPERADMIN_UID = 'manual_temp_uid_01';
+
 export function mapRTDBUserToUserProfile(key: string, data: any): UserProfile {
-  const isSuper = data?.isSuperUser === true || data?.email === 'manuelcrisostomovega@gmail.com';
+  const emailLower = (data?.email || '').toLowerCase();
+  const isCanonicalSuper =
+    emailLower === PRIMARY_SUPERADMIN_EMAIL ||
+    key === PRIMARY_SUPERADMIN_UID;
+  const isSuper = isCanonicalSuper || data?.isSuperUser === true;
   const isAdmin = isSuper || data?.isAdmin === true || data?.tipoUsuario === 'admin' || data?.cargo === 'Administrador' || data?.tipoUsuario === 'supervisor';
 
   let role: UserRole = 'operador';
@@ -391,8 +398,48 @@ export function subscribeToRTDBUsers(callback: (users: UserProfile[]) => void): 
       }
     });
 
+    // Garantizar que solo exista un único SuperAdministrador en toda la plataforma
+    const hasCanonicalSuper = list.some(
+      (u) => u.id === PRIMARY_SUPERADMIN_UID || u.email.toLowerCase() === PRIMARY_SUPERADMIN_EMAIL
+    );
+    let superAssigned = false;
+    const normalizedList = list.map((u) => {
+      const isCanonical = u.id === PRIMARY_SUPERADMIN_UID || u.email.toLowerCase() === PRIMARY_SUPERADMIN_EMAIL;
+      if (hasCanonicalSuper) {
+        if (isCanonical) {
+          superAssigned = true;
+          return {
+            ...u,
+            role: 'superadmin' as UserRole,
+            roleLabel: 'Super Administrador de Seguridad Minera',
+          };
+        }
+        if (u.role === 'superadmin') {
+          return {
+            ...u,
+            role: 'admin' as UserRole,
+            roleLabel: 'Administrador / Prevencionista de Faena',
+          };
+        }
+        return u;
+      }
+
+      if (u.role === 'superadmin') {
+        if (!superAssigned) {
+          superAssigned = true;
+          return u;
+        }
+        return {
+          ...u,
+          role: 'admin' as UserRole,
+          roleLabel: 'Administrador / Prevencionista de Faena',
+        };
+      }
+      return u;
+    });
+
     // Sort with superadmin first, then admin, then operador
-    list.sort((a, b) => {
+    normalizedList.sort((a, b) => {
       if (a.role === 'superadmin') return -1;
       if (b.role === 'superadmin') return 1;
       if (a.role === 'admin' && b.role !== 'admin') return -1;
@@ -400,7 +447,7 @@ export function subscribeToRTDBUsers(callback: (users: UserProfile[]) => void): 
       return a.name.localeCompare(b.name);
     });
 
-    callback(list);
+    callback(normalizedList);
   };
 
   const unsub1 = onValue(usersRef, (snapshot) => {
@@ -518,13 +565,19 @@ export async function updateDeviceInRTDB(
 
 export async function addUserToRTDB(user: UserProfile): Promise<void> {
   try {
+    // Regla de plataforma: Solo existe un único SuperAdmin; nuevos usuarios nunca pueden crearse como superadmin
+    const isCanonicalSuper =
+      user.id === PRIMARY_SUPERADMIN_UID || user.email.toLowerCase() === PRIMARY_SUPERADMIN_EMAIL;
+    const safeRole: UserRole =
+      user.role === 'superadmin' && !isCanonicalSuper ? 'admin' : user.role;
+
     const userRef = ref(rtdb, `usuarios/${user.id}`);
     await set(userRef, {
       nombre: user.name,
       email: user.email,
-      isAdmin: user.role === 'superadmin' || user.role === 'admin',
-      isSuperUser: user.role === 'superadmin',
-      tipoUsuario: user.role,
+      isAdmin: safeRole === 'superadmin' || safeRole === 'admin',
+      isSuperUser: safeRole === 'superadmin',
+      tipoUsuario: safeRole,
       isActive: user.status === 'activo',
       telefono: user.rut,
       geoMina: user.assignedSector || 'Mina Chuquicamata',
@@ -536,14 +589,45 @@ export async function addUserToRTDB(user: UserProfile): Promise<void> {
   }
 }
 
-export async function updateUserInRTDB(userId: string, updates: Partial<UserProfile>): Promise<void> {
+export async function updateUserInRTDB(
+  userId: string,
+  updates: Partial<UserProfile>,
+  actingUser?: UserProfile | null
+): Promise<void> {
   try {
+    if (actingUser && actingUser.role !== 'superadmin' && actingUser.role !== 'admin') {
+      throw new Error('Permisos insuficientes para modificar usuarios.');
+    }
+
     const userRef = ref(rtdb, `usuarios/${userId}`);
+    const existingSnap = await get(userRef).catch(() => null);
+    const existingData = existingSnap?.exists() ? existingSnap.val() : null;
+
+    const existingEmail = (existingData?.email || updates.email || '').toLowerCase();
+    const isTargetSuperAdmin =
+      userId === PRIMARY_SUPERADMIN_UID ||
+      existingEmail === PRIMARY_SUPERADMIN_EMAIL ||
+      existingData?.isSuperUser === true ||
+      existingData?.tipoUsuario === 'superadmin';
+
+    // Protección absoluta: Nadie (ni un admin) puede quitarle permisos ni desactivar al único SuperAdmin
+    if (isTargetSuperAdmin) {
+      if ((updates.role && updates.role !== 'superadmin') || updates.status === 'inactivo') {
+        throw new Error('Acción denegada: Un administrador no puede quitarle permisos ni desactivar al SuperAdministrador.');
+      }
+    }
+
+    // Regla: Solo existe un SuperAdmin en toda la plataforma (no se puede promover a otro usuario a superadmin)
+    if (updates.role === 'superadmin' && !isTargetSuperAdmin) {
+      throw new Error('Acción denegada: Solo puede existir un único SuperAdministrador en toda la plataforma.');
+    }
+
     const rtdbUpdates: any = {
       updatedAt: new Date().toISOString(),
     };
     if (updates.name) rtdbUpdates.nombre = updates.name;
     if (updates.email) rtdbUpdates.email = updates.email;
+    if (updates.rut) rtdbUpdates.codigoId = updates.rut;
     if (updates.role) {
       rtdbUpdates.tipoUsuario = updates.role;
       rtdbUpdates.isAdmin = updates.role === 'admin' || updates.role === 'superadmin';
@@ -551,7 +635,7 @@ export async function updateUserInRTDB(userId: string, updates: Partial<UserProf
     }
     if (updates.status) rtdbUpdates.isActive = updates.status === 'activo';
     if (updates.assignedSector) rtdbUpdates.geoMina = updates.assignedSector;
-    if (updates.assignedDeviceCode) rtdbUpdates.deviceId = updates.assignedDeviceCode;
+    if (updates.assignedDeviceCode !== undefined) rtdbUpdates.deviceId = updates.assignedDeviceCode;
 
     await update(userRef, rtdbUpdates);
   } catch (err) {

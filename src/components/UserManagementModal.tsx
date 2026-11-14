@@ -128,15 +128,20 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-slate-300 block mb-1">Rol Operativo</label>
-                <select
-                  value={editRole}
-                  onChange={(e) => setEditRole(e.target.value as UserRole)}
-                  className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded text-white"
-                >
-                  <option value="superadmin">Super Administrador</option>
-                  <option value="admin">Administrador / Prevencionista</option>
-                  <option value="operador">Usuario Normal (Operador)</option>
-                </select>
+                {currentUser.role === 'superadmin' ? (
+                  <div className="w-full px-3 py-1.5 bg-purple-950/50 border border-purple-800 rounded text-purple-200 font-semibold">
+                    Super Administrador Único (Protegido)
+                  </div>
+                ) : (
+                  <select
+                    value={editRole === 'superadmin' ? 'admin' : editRole}
+                    onChange={(e) => setEditRole(e.target.value as UserRole)}
+                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded text-white"
+                  >
+                    <option value="admin">Administrador / Prevencionista</option>
+                    <option value="operador">Usuario Normal (Operador)</option>
+                  </select>
+                )}
               </div>
               <div>
                 <label className="text-slate-300 block mb-1">Turno Asignado</label>
