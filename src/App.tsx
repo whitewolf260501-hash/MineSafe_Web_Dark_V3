@@ -192,9 +192,32 @@ export default function App() {
 
       // Realtime listener for Alerts & Incident Descriptions (/alertas + /bitacora_contingencias)
       unsubAlerts = subscribeToRTDBAlerts((remoteAlerts) => {
-        const remoteIds = new Set(remoteAlerts.map((a) => a.id));
+        const mockById = new Map(INITIAL_ALERTS.map((m) => [m.id, m]));
+        const enrichedRemote = remoteAlerts.map((a) => {
+          const mock = mockById.get(a.id);
+          if (!mock) return a;
+          const isFallbackTitle =
+            a.title === 'Alerta de Seguridad' || a.title.startsWith('Contingencia Registrada (');
+          return {
+            ...a,
+            code: a.code === a.id ? mock.code : a.code,
+            title: isFallbackTitle ? mock.title : a.title,
+            severity: a.severity === 'advertencia' && mock.severity ? mock.severity : a.severity,
+            variableName: a.variableName === 'Variable Ambiental' ? mock.variableName : a.variableName,
+            sensorId: a.sensorId === 'device_38A839E81F84' && mock.sensorId ? mock.sensorId : a.sensorId,
+            sensorCode: a.sensorCode === 'device_38A839E81F84' || a.sensorCode === 'ESP32' ? mock.sensorCode : a.sensorCode,
+            sectorName: a.sectorName === 'Mina Chuquicamata - Rampa Principal' && mock.sectorName ? mock.sectorName : a.sectorName,
+            recordedValue: a.recordedValue === '-' ? mock.recordedValue : a.recordedValue,
+            safeLimit: a.safeLimit === '-' ? mock.safeLimit : a.safeLimit,
+            suggestedAction:
+              a.suggestedAction === 'Verificar condiciones del sector y registrar medidas de control.'
+                ? mock.suggestedAction
+                : a.suggestedAction,
+          };
+        });
+        const remoteIds = new Set(enrichedRemote.map((a) => a.id));
         const merged = [
-          ...remoteAlerts,
+          ...enrichedRemote,
           ...INITIAL_ALERTS.filter((mockAlert) => !remoteIds.has(mockAlert.id)),
         ];
         alertEngine.syncExistingActiveAlerts(merged);

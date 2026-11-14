@@ -70,6 +70,11 @@ export interface AlarmAuditRecord {
   humedad: number;
   via?: string;
   timestampServer?: number;
+  metricSummary?: string;
+  correctiveActions?: string;
+  resolvedBy?: string;
+  sourceKind?: 'esp32' | 'bitacora_web';
+  alertTitle?: string;
 }
 
 export interface ESP32GatewayData {

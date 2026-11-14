@@ -620,6 +620,7 @@ export function extractAlarmAuditRecords(devices: SensorDevice[]): AlarmAuditRec
             humedad: typeof item.humedad === 'number' ? item.humedad : (typeof item.hum === 'number' ? item.hum : (dev.rawHum || 0)),
             via: item.via || 'WIFI_DIRECTO',
             timestampServer: item.timestamp_server || item.last_update_server || 0,
+            sourceKind: 'esp32',
           });
         }
       });
@@ -632,6 +633,51 @@ export function extractAlarmAuditRecords(devices: SensorDevice[]): AlarmAuditRec
     }
     return b.hora.localeCompare(a.hora);
   });
+}
+
+export function buildAuditRecordsFromAlerts(alerts: SafetyAlert[]): AlarmAuditRecord[] {
+  const originMap: Record<string, string> = {
+    emergencia_real: 'BITACORA_EMERGENCIA_REAL',
+    simulacro: 'BITACORA_SIMULACRO',
+    falsa_alarma_sensor: 'BITACORA_FALSA_ALARMA',
+    prueba_operativa: 'BITACORA_PRUEBA_OPERATIVA',
+  };
+
+  return alerts
+    .filter((a) => a.resolved || Boolean(a.resolutionDetails?.comment))
+    .map((a) => {
+      const dateSource = a.resolutionDetails?.resolvedAt || a.timestamp || '';
+      const parts = dateSource.split(',').map((p) => p.trim());
+      const fecha = parts[0] || dateSource || 'Reciente';
+      const hora = parts[1] || (a.timestampMs ? new Date(a.timestampMs).toLocaleTimeString('es-CL') : '—');
+      const origen = a.resolutionDetails?.resolutionType
+        ? originMap[a.resolutionDetails.resolutionType] || 'BITACORA_CONSOLIDADA'
+        : 'BITACORA_CONSOLIDADA';
+
+      return {
+        id: a.code ? `${a.code} (${a.id})` : a.id,
+        deviceId: a.sensorCode || a.sensorId,
+        deviceName: a.sectorName || a.sensorCode || a.sensorId,
+        fecha,
+        hora,
+        origen,
+        alertTitle: a.title,
+        descripcion:
+          a.resolutionDetails?.comment ||
+          a.suggestedAction ||
+          'Alerta cerrada y documentada en bitácora.',
+        correctiveActions: a.resolutionDetails?.correctiveActions,
+        resolvedBy: a.resolutionDetails?.resolvedBy || a.acknowledgedBy || 'Supervisor',
+        metricSummary: `${a.variableName}: ${a.recordedValue} (Límite: ${a.safeLimit})`,
+        co: 0,
+        pm25: 0,
+        temperatura: 0,
+        humedad: 0,
+        via: 'BITACORA_WEB_RTDB',
+        timestampServer: a.timestampMs || 0,
+        sourceKind: 'bitacora_web' as const,
+      };
+    });
 }
 
 export function subscribeToRTDBAlarmRecords(callback: (records: AlarmAuditRecord[]) => void): () => void {
@@ -1353,14 +1399,11 @@ export function subscribeToRTDBAlerts(callback: (alerts: SafetyAlert[]) => void)
         Boolean(data.tipo_resolucion) ||
         Boolean(bit.tipoResolucion);
 
-      const tsNum =
-        typeof data.timestamp === 'number'
-          ? data.timestamp
-          : typeof data.timestamp_cierre === 'number'
-          ? data.timestamp_cierre
-          : typeof bit.timestamp === 'number'
-          ? bit.timestamp
-          : 0;
+      const tsNum = Math.max(
+        typeof data.timestamp_cierre === 'number' ? data.timestamp_cierre : 0,
+        typeof bit.timestamp === 'number' ? bit.timestamp : 0,
+        typeof data.timestamp === 'number' ? data.timestamp : 0
+      );
 
       const mappedAlert: SafetyAlert = {
         id,

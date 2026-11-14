@@ -39,7 +39,7 @@ import {
   AlarmAuditRecord 
 } from '../types';
 import { soundAlert } from '../services/audioAlert';
-import { extractAlarmAuditRecords } from '../services/firebase';
+import { extractAlarmAuditRecords, buildAuditRecordsFromAlerts } from '../services/firebase';
 import { AlertResolutionModal } from './AlertResolutionModal';
 
 interface AlertsViewProps {
@@ -80,17 +80,27 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
   const [searchAudit, setSearchAudit] = useState('');
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
-  // Extract all alarm records from devices connected to Firebase RTDB
-  const allAuditRecords: AlarmAuditRecord[] = extractAlarmAuditRecords(devices);
+  // Combine ESP32 hardware /registro_alarmas with web-documented alert resolutions (/alertas + /bitacora_contingencias)
+  const esp32AuditRecords: AlarmAuditRecord[] = extractAlarmAuditRecords(devices);
+  const webBitacoraAuditRecords: AlarmAuditRecord[] = buildAuditRecordsFromAlerts(alerts);
+  const allAuditRecords: AlarmAuditRecord[] = [...webBitacoraAuditRecords, ...esp32AuditRecords].sort(
+    (a, b) => (b.timestampServer || 0) - (a.timestampServer || 0)
+  );
 
   // Filter audit records
   const filteredAuditRecords = allAuditRecords.filter((rec) => {
     const matchesDevice = filterAuditDevice === 'all' || rec.deviceId === filterAuditDevice;
     const matchesOrigin = filterAuditOrigin === 'all' || rec.origen === filterAuditOrigin;
-    const matchesSearch = 
-      rec.id.toLowerCase().includes(searchAudit.toLowerCase()) ||
-      rec.deviceName.toLowerCase().includes(searchAudit.toLowerCase()) ||
-      rec.descripcion.toLowerCase().includes(searchAudit.toLowerCase()) ||
+    const q = searchAudit.toLowerCase();
+    const matchesSearch =
+      !q ||
+      rec.id.toLowerCase().includes(q) ||
+      rec.deviceName.toLowerCase().includes(q) ||
+      rec.deviceId.toLowerCase().includes(q) ||
+      rec.descripcion.toLowerCase().includes(q) ||
+      (rec.alertTitle || '').toLowerCase().includes(q) ||
+      (rec.correctiveActions || '').toLowerCase().includes(q) ||
+      (rec.resolvedBy || '').toLowerCase().includes(q) ||
       rec.fecha.includes(searchAudit) ||
       rec.hora.includes(searchAudit);
     return matchesDevice && matchesOrigin && matchesSearch;
@@ -166,7 +176,15 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
     const csvRows = [headers.join(';')];
 
     rowsToExport.forEach((rec) => {
-      const cleanDesc = (rec.descripcion || '').replace(/[\r\n;]/g, ' ');
+      const cleanDesc = [
+        rec.alertTitle ? `[${rec.alertTitle}]` : '',
+        rec.descripcion || '',
+        rec.correctiveActions ? `Medidas: ${rec.correctiveActions}` : '',
+        rec.resolvedBy ? `Responsable: ${rec.resolvedBy}` : '',
+      ]
+        .filter(Boolean)
+        .join(' | ')
+        .replace(/[\r\n;]/g, ' ');
       const row = [
         rec.id,
         rec.deviceId,
@@ -174,10 +192,10 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
         rec.fecha,
         rec.hora,
         rec.origen,
-        rec.co,
-        rec.pm25,
-        rec.temperatura,
-        rec.humedad,
+        rec.sourceKind === 'bitacora_web' ? (rec.metricSummary || '-') : rec.co,
+        rec.sourceKind === 'bitacora_web' ? '-' : rec.pm25,
+        rec.sourceKind === 'bitacora_web' ? '-' : rec.temperatura,
+        rec.sourceKind === 'bitacora_web' ? '-' : rec.humedad,
         rec.via || 'WIFI_DIRECTO',
         `"${cleanDesc}"`
       ];
@@ -295,12 +313,16 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                   <div style="font-size:8px; color:#64748b; margin-top:2px;">Vía: ${r.via || 'WIFI_DIRECTO'}</div>
                 </td>
                 <td>
-                  <strong>CO:</strong> ${r.co} ADC<br>
-                  <strong>PM2.5:</strong> ${r.pm25} µg/m³<br>
-                  <strong>Clima:</strong> ${r.temperatura}°C | ${r.humedad}%
+                  ${r.sourceKind === 'bitacora_web'
+                    ? `<strong>Parámetro:</strong> ${r.metricSummary || '-'}`
+                    : `<strong>CO:</strong> ${r.co} ADC<br><strong>PM2.5:</strong> ${r.pm25} µg/m³<br><strong>Clima:</strong> ${r.temperatura}°C | ${r.humedad}%`
+                  }
                 </td>
                 <td style="line-height: 1.35; color:#334155;">
+                  ${r.alertTitle ? `<strong>${r.alertTitle}</strong><br>` : ''}
                   ${r.descripcion}
+                  ${r.correctiveActions ? `<br><span style="color:#475569;"><strong>Medidas:</strong> ${r.correctiveActions}</span>` : ''}
+                  ${r.resolvedBy ? `<br><span style="color:#0369a1;"><strong>Responsable:</strong> ${r.resolvedBy}</span>` : ''}
                 </td>
               </tr>
             `).join('')}
@@ -438,19 +460,38 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
           </button>
         </div>
 
-        {/* Export Feedback Toast */}
+        {/* Export / Save Feedback Toast */}
         {exportNotice && (
-          <div className="mt-4 p-3 bg-cyan-950/90 border border-cyan-500/60 text-cyan-200 rounded-xl text-xs font-semibold flex items-center justify-between shadow-lg animate-in fade-in">
+          <div className="mt-4 p-3 bg-cyan-950/90 border border-cyan-500/60 text-cyan-200 rounded-xl text-xs font-semibold flex flex-wrap items-center justify-between gap-2 shadow-lg animate-in fade-in">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
               <span>{exportNotice}</span>
             </div>
-            <button 
-              onClick={() => setExportNotice(null)} 
-              className="text-cyan-400 hover:text-white text-[10px] font-bold"
-            >
-              Cerrar
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSubTab('alertas_activas');
+                  setFilterStatus('resolved');
+                }}
+                className="px-2.5 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-bold transition-colors"
+              >
+                Ver Resueltas ({resolvedAlertsCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubTab('auditoria_rtdb')}
+                className="px-2.5 py-1 rounded bg-cyan-700 hover:bg-cyan-600 text-white text-[11px] font-bold transition-colors"
+              >
+                Ver Auditoría ({allAuditRecords.length})
+              </button>
+              <button 
+                onClick={() => setExportNotice(null)} 
+                className="text-cyan-400 hover:text-white text-[10px] font-bold ml-1"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         )}
 
@@ -683,17 +724,17 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
           {/* Auditoría Header & Export Bar */}
           <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-xl">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Radio className="w-5 h-5 text-cyan-400 animate-pulse" />
                 <h2 className="text-base font-bold text-white tracking-wide">
-                  Bitácora de Auditoría de Alarmas en Firebase (ESP32)
+                  Bitácora Consolidada y Auditoría de Alarmas (RTDB / ESP32)
                 </h2>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800">
-                  /registro_alarmas
+                  /registro_alarmas · /alertas · /bitacora_contingencias
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                Registros históricos de disparos guardados directamente por el firmware del ESP32 Gateway y nodos sensores.
+                Historial unificado con los disparos del ESP32 Gateway y todas las alertas descritas y resueltas desde la consola web.
               </p>
             </div>
 
@@ -727,7 +768,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
               <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
               <input
                 type="text"
-                placeholder="Buscar por ID, dispositivo, descripción o fecha..."
+                placeholder="Buscar por ID, dispositivo, descripción, responsable o fecha..."
                 value={searchAudit}
                 onChange={(e) => setSearchAudit(e.target.value)}
                 className="w-full pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
@@ -755,9 +796,13 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                 onChange={(e) => setFilterAuditOrigin(e.target.value)}
                 className="px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-cyan-500"
               >
-                <option value="all">Todos los orígenes</option>
-                <option value="CAUSA_NATURAL_SENSORES">Causa Natural (Sensores)</option>
-                <option value="ACTIVACION_MANUAL_USUARIO">Activación Manual (Pánico)</option>
+                <option value="all">Todos los orígenes ({allAuditRecords.length})</option>
+                <option value="BITACORA_EMERGENCIA_REAL">Bitácora: Emergencia Real</option>
+                <option value="BITACORA_SIMULACRO">Bitácora: Simulacro</option>
+                <option value="BITACORA_FALSA_ALARMA">Bitácora: Falsa Alarma / Sensor</option>
+                <option value="BITACORA_PRUEBA_OPERATIVA">Bitácora: Prueba Operativa</option>
+                <option value="CAUSA_NATURAL_SENSORES">ESP32: Causa Natural (Sensores)</option>
+                <option value="ACTIVACION_MANUAL_USUARIO">ESP32: Activación Manual (Pánico)</option>
               </select>
             </div>
           </div>
@@ -768,7 +813,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
               <div className="text-center py-12 text-slate-400">
                 <Radio className="w-10 h-10 text-slate-600 mx-auto mb-2" />
                 <p className="text-sm font-semibold text-slate-300">No hay registros de alarmas que coincidan con los filtros.</p>
-                <p className="text-xs text-slate-400 mt-1">Los disparos de alarma del ESP32 se registrarán automáticamente aquí.</p>
+                <p className="text-xs text-slate-400 mt-1">Los disparos de alarma del ESP32 y las alertas descritas en bitácora aparecerán aquí.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -776,32 +821,40 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                   <thead>
                     <tr className="bg-slate-950/90 border-b border-slate-800 text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
                       <th className="py-3 px-4">Fecha / Hora</th>
-                      <th className="py-3 px-4">Dispositivo</th>
-                      <th className="py-3 px-4">Origen</th>
-                      <th className="py-3 px-4">Mediciones Disparo</th>
-                      <th className="py-3 px-4">Descripción de Monitoreo</th>
+                      <th className="py-3 px-4">Dispositivo / Sector</th>
+                      <th className="py-3 px-4">Origen / Tipo</th>
+                      <th className="py-3 px-4">Mediciones / Parámetro</th>
+                      <th className="py-3 px-4">Descripción Guardada</th>
                       <th className="py-3 px-4">Vía</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
                     {filteredAuditRecords.map((rec) => {
-                      const isNatural = rec.origen.includes('NATURAL');
+                      const isNatural = rec.origen.includes('NATURAL') || rec.origen.includes('EMERGENCIA_REAL');
+                      const isWeb = rec.sourceKind === 'bitacora_web';
                       return (
-                        <tr key={`${rec.deviceId}-${rec.id}`} className="hover:bg-slate-800/40 transition-colors">
+                        <tr key={`${rec.sourceKind || 'esp'}-${rec.deviceId}-${rec.id}`} className="hover:bg-slate-800/40 transition-colors align-top">
                           <td className="py-3 px-4 whitespace-nowrap">
                             <span className="font-bold text-white block">{rec.fecha}</span>
                             <span className="text-[11px] font-mono text-cyan-400">{rec.hora}</span>
                           </td>
 
                           <td className="py-3 px-4">
-                            <span className="font-bold text-slate-200 block truncate max-w-[160px]">{rec.deviceName}</span>
-                            <span className="text-[10px] font-mono text-slate-400">{rec.deviceId}</span>
+                            <span className="font-bold text-slate-200 block truncate max-w-[180px]">{rec.deviceName}</span>
+                            <span className="text-[10px] font-mono text-slate-400 block">{rec.deviceId}</span>
+                            {isWeb && (
+                              <span className="text-[9px] font-mono text-slate-500 block mt-0.5 truncate max-w-[180px]">{rec.id}</span>
+                            )}
                           </td>
 
                           <td className="py-3 px-4 whitespace-nowrap">
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border font-mono ${
                               isNatural 
-                                ? 'bg-rose-950 text-rose-300 border-rose-800' 
+                                ? 'bg-rose-950 text-rose-300 border-rose-800'
+                                : rec.origen.includes('FALSA_ALARMA')
+                                ? 'bg-cyan-950 text-cyan-300 border-cyan-800'
+                                : rec.origen.includes('PRUEBA')
+                                ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
                                 : 'bg-amber-950 text-amber-300 border-amber-800'
                             }`}>
                               {isNatural ? <Flame className="w-2.5 h-2.5" /> : <HardHat className="w-2.5 h-2.5" />}
@@ -809,25 +862,52 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                             </span>
                           </td>
 
-                          <td className="py-3 px-4 whitespace-nowrap font-mono text-[11px]">
-                            <div className="flex items-center gap-2">
-                              <span className="text-amber-300">CO: <strong>{rec.co} ADC</strong></span>
-                              <span className="text-slate-600">|</span>
-                              <span className="text-purple-300">PM2.5: <strong>{rec.pm25} µg/m³</strong></span>
-                            </div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">
-                              {rec.temperatura}°C • {rec.humedad}% Hum
-                            </div>
+                          <td className="py-3 px-4 font-mono text-[11px]">
+                            {isWeb ? (
+                              <span className="text-cyan-300 font-semibold block max-w-[200px]">
+                                {rec.metricSummary}
+                              </span>
+                            ) : (
+                              <>
+                                <div className="flex items-center gap-2 whitespace-nowrap">
+                                  <span className="text-amber-300">CO: <strong>{rec.co} ADC</strong></span>
+                                  <span className="text-slate-600">|</span>
+                                  <span className="text-purple-300">PM2.5: <strong>{rec.pm25} µg/m³</strong></span>
+                                </div>
+                                <div className="text-[10px] text-slate-400 mt-0.5">
+                                  {rec.temperatura}°C • {rec.humedad}% Hum
+                                </div>
+                              </>
+                            )}
                           </td>
 
                           <td className="py-3 px-4">
+                            {rec.alertTitle && (
+                              <span className="text-[11px] font-bold text-white block mb-0.5">
+                                {rec.alertTitle}
+                              </span>
+                            )}
                             <p className="text-slate-300 text-[11px] leading-relaxed max-w-md">
                               {rec.descripcion}
                             </p>
+                            {rec.correctiveActions && (
+                              <p className="text-[10px] text-slate-400 mt-1 max-w-md">
+                                <strong className="text-slate-300">Medidas:</strong> {rec.correctiveActions}
+                              </p>
+                            )}
+                            {rec.resolvedBy && (
+                              <span className="text-[10px] text-cyan-300 block mt-0.5">
+                                Responsable: {rec.resolvedBy}
+                              </span>
+                            )}
                           </td>
 
                           <td className="py-3 px-4 whitespace-nowrap">
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono border ${
+                              isWeb
+                                ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800'
+                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                            }`}>
                               {rec.via || 'WIFI_DIRECTO'}
                             </span>
                           </td>
