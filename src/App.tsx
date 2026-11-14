@@ -67,7 +67,11 @@ import {
   isTabVisibleForUser,
   subscribeToFirebaseAuth,
   logoutFromFirebaseAuth,
-  verifySuperAdminPrivileges
+  verifySuperAdminPrivileges,
+  loadCachedSites,
+  mergeMiningSites,
+  saveSiteToRTDB,
+  subscribeToRTDBSites
 } from './services/firebase';
 
 import { soundAlert } from './services/audioAlert';
@@ -110,8 +114,13 @@ export default function App() {
   alertsRef.current = alerts;
   const [rentals, setRentals] = useState<DeviceRental[]>(INITIAL_RENTALS);
   const [assignments, setAssignments] = useState<WorkerAssignment[]>(INITIAL_ASSIGNMENTS);
-  const [sites, setSites] = useState<MiningSite[]>(MINING_SITES);
-  const [currentSite, setCurrentSite] = useState<MiningSite>(MINING_SITES[0]);
+  const [sites, setSites] = useState<MiningSite[]>(() =>
+    mergeMiningSites(MINING_SITES, loadCachedSites())
+  );
+  const [currentSite, setCurrentSite] = useState<MiningSite>(() => {
+    const initial = mergeMiningSites(MINING_SITES, loadCachedSites());
+    return initial[0] || MINING_SITES[0];
+  });
   const [usersList, setUsersList] = useState<UserProfile[]>(PRELOADED_USERS);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
@@ -158,6 +167,7 @@ export default function App() {
     let unsubAlerts: (() => void) | null = null;
     let unsubDrill: (() => void) | null = null;
     let unsubPlatform: (() => void) | null = null;
+    let unsubSites: (() => void) | null = null;
 
     async function initRealtimeDatabase() {
       const connected = await testConnection();
@@ -239,6 +249,17 @@ export default function App() {
       unsubPlatform = subscribeToPlatformConfig((cfg) => {
         setPlatformConfig(cfg);
       });
+
+      // Realtime listener for Mining Sites, Sectors & Assigned Crews (/faenas)
+      unsubSites = subscribeToRTDBSites((remoteSites) => {
+        if (remoteSites && remoteSites.length > 0) {
+          setSites((prev) => {
+            const merged = mergeMiningSites(mergeMiningSites(MINING_SITES, prev), remoteSites);
+            setCurrentSite((curr) => merged.find((s) => s.id === curr.id) || merged[0] || curr);
+            return merged;
+          });
+        }
+      });
     }
 
     initRealtimeDatabase();
@@ -250,6 +271,7 @@ export default function App() {
       if (unsubAlerts) unsubAlerts();
       if (unsubDrill) unsubDrill();
       if (unsubPlatform) unsubPlatform();
+      if (unsubSites) unsubSites();
     };
   }, []);
 
@@ -918,8 +940,17 @@ export default function App() {
   }, []);
 
   const handleAddSite = useCallback((newSite: MiningSite) => {
-    setSites((prev) => [...prev, newSite]);
+    setSites((prev) => mergeMiningSites(prev, [newSite]));
     setCurrentSite(newSite);
+    saveSiteToRTDB(newSite).catch(() => {});
+  }, []);
+
+  const handleUpdateSite = useCallback((updatedSite: MiningSite) => {
+    setSites((prev) =>
+      prev.map((s) => (s.id === updatedSite.id ? updatedSite : s))
+    );
+    setCurrentSite((prev) => (prev.id === updatedSite.id ? updatedSite : prev));
+    saveSiteToRTDB(updatedSite).catch(() => {});
   }, []);
 
   // User Management Handlers
@@ -1392,11 +1423,13 @@ export default function App() {
               <MiningSectorsView
                 currentSite={currentSite}
                 allSites={sites}
+                assignments={assignments}
                 onSelectSite={(siteId) => {
                   const found = sites.find(s => s.id === siteId);
                   if (found) setCurrentSite(found);
                 }}
                 onAddSite={handleAddSite}
+                onUpdateSite={handleUpdateSite}
                 onNavigateTab={handleSelectTab}
               />
             )}

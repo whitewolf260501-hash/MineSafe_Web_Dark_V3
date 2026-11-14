@@ -46,7 +46,9 @@ import {
   NavigationTab,
   PlatformConfig,
   WindowOverrideValue,
-  RegisteredDeviceConfig
+  RegisteredDeviceConfig,
+  MiningSite,
+  MiningSector
 } from '../types';
 
 export const USER_RTDB_URL = "https://minefase-fc5f5-default-rtdb.firebaseio.com/";
@@ -2295,6 +2297,129 @@ export async function resetPlatformConfigToDefault(
   await set(ref(rtdb, 'configuracion_plataforma'), restored);
   return restored;
 }
+
+/**
+ * ============================================================================
+ * PERSISTENCIA DE FAENAS MINERAS, SECTORES Y CUADRILLAS ASIGNADAS (/faenas)
+ * ============================================================================
+ */
+const FAENAS_CACHE_KEY = 'minesafe_saved_faenas_v1';
+
+function normalizeSector(raw: any, index: number): MiningSector {
+  const crewsRaw = raw?.assignedCrews;
+  const assignedCrews: string[] = Array.isArray(crewsRaw)
+    ? crewsRaw.filter((c) => typeof c === 'string' && c.trim() !== '')
+    : crewsRaw && typeof crewsRaw === 'object'
+    ? (Object.values(crewsRaw).filter((c) => typeof c === 'string' && c.trim() !== '') as string[])
+    : [];
+
+  return {
+    id: raw?.id || `sec-${Date.now()}-${index}`,
+    name: raw?.name || `Sector ${index + 1}`,
+    code: raw?.code || `SEC-0${index + 1}`,
+    depthMeters: typeof raw?.depthMeters === 'number' ? raw.depthMeters : Number(raw?.depthMeters) || 200,
+    type: raw?.type || 'socavon',
+    activeWorkers: typeof raw?.activeWorkers === 'number' ? raw.activeWorkers : Number(raw?.activeWorkers) || 0,
+    sensorsCount: typeof raw?.sensorsCount === 'number' ? raw.sensorsCount : Number(raw?.sensorsCount) || 1,
+    generalStatus: raw?.generalStatus || 'normal',
+    ventilationFanStatus: raw?.ventilationFanStatus || 'operativo_normal',
+    assignedCrews,
+  };
+}
+
+export function normalizeMiningSite(raw: any, fallbackId?: string): MiningSite {
+  const rawSectors = raw?.activeSectors;
+  const sectorsArr: any[] = Array.isArray(rawSectors)
+    ? rawSectors
+    : rawSectors && typeof rawSectors === 'object'
+    ? Object.values(rawSectors)
+    : [];
+
+  return {
+    id: raw?.id || fallbackId || `site-${Date.now()}`,
+    name: raw?.name || 'Faena Minera',
+    company: raw?.company || 'Empresa Minera',
+    location: raw?.location || (raw?.comuna && raw?.region ? `${raw.comuna}, ${raw.region}` : 'Chile'),
+    comuna: raw?.comuna || undefined,
+    region: raw?.region || 'Antofagasta',
+    type: raw?.type || 'subterranea',
+    elevationMsl: typeof raw?.elevationMsl === 'number' ? raw.elevationMsl : Number(raw?.elevationMsl) || 2400,
+    isPreloaded: Boolean(raw?.isPreloaded),
+    activeSectors: sectorsArr.map((s, idx) => normalizeSector(s, idx)),
+  };
+}
+
+export function loadCachedSites(): MiningSite[] {
+  try {
+    const raw = localStorage.getItem(FAENAS_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((s) => normalizeMiningSite(s));
+  } catch {
+    return [];
+  }
+}
+
+export function saveCachedSites(sites: MiningSite[]): void {
+  try {
+    localStorage.setItem(FAENAS_CACHE_KEY, JSON.stringify(sites));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+export function mergeMiningSites(baseSites: MiningSite[], incomingSites: MiningSite[]): MiningSite[] {
+  const map = new Map<string, MiningSite>();
+  baseSites.forEach((s) => map.set(s.id, normalizeMiningSite(s, s.id)));
+  incomingSites.forEach((s) => map.set(s.id, normalizeMiningSite(s, s.id)));
+  return Array.from(map.values());
+}
+
+export async function saveSiteToRTDB(
+  site: MiningSite
+): Promise<{ savedToRTDB: boolean; error?: string }> {
+  const cleanSite: MiningSite = JSON.parse(JSON.stringify(normalizeMiningSite(site, site.id)));
+  const cached = loadCachedSites();
+  saveCachedSites(mergeMiningSites(cached, [cleanSite]));
+
+  try {
+    await set(ref(rtdb, `faenas/${cleanSite.id}`), {
+      ...cleanSite,
+      updatedAt: Date.now(),
+    });
+    return { savedToRTDB: true };
+  } catch (err: any) {
+    console.warn('Error saving site to RTDB (/faenas):', err);
+    return {
+      savedToRTDB: false,
+      error: err?.message || 'Guardado en respaldo local (sin permisos en /faenas de RTDB).',
+    };
+  }
+}
+
+export function subscribeToRTDBSites(
+  callback: (sites: MiningSite[]) => void
+): () => void {
+  const sitesRef = ref(rtdb, 'faenas');
+  return onValue(
+    sitesRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const val = snapshot.val() || {};
+        const remoteList = Object.keys(val).map((k) => normalizeMiningSite(val[k], k));
+        callback(remoteList);
+      } else {
+        callback([]);
+      }
+    },
+    (err) => {
+      console.warn('Error subscribing to RTDB /faenas:', err);
+      callback([]);
+    }
+  );
+}
+
 
 
 

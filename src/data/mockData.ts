@@ -184,10 +184,12 @@ export const MINING_SITES: MiningSite[] = [
     id: 'site-1',
     name: 'Faena El Teniente - Nivel Subterráneo 6',
     company: 'Codelco División El Teniente',
-    location: 'Rancagua, Región de O\'Higgins',
-    region: 'Libertador General Bernardo O\'Higgins',
+    location: "Rancagua, Región de O'Higgins",
+    comuna: 'Machalí',
+    region: "Libertador General Bernardo O'Higgins",
     type: 'subterranea',
     elevationMsl: 2120,
+    isPreloaded: true,
     activeSectors: [
       {
         id: 'sec-101',
@@ -199,6 +201,7 @@ export const MINING_SITES: MiningSite[] = [
         sensorsCount: 6,
         generalStatus: 'normal',
         ventilationFanStatus: 'operativo_normal',
+        assignedCrews: ['Cuadrilla Alfa - Turno Mañana'],
       },
       {
         id: 'sec-102',
@@ -210,6 +213,7 @@ export const MINING_SITES: MiningSite[] = [
         sensorsCount: 8,
         generalStatus: 'advertencia',
         ventilationFanStatus: 'ventilacion_forzada',
+        assignedCrews: ['Cuadrilla Perforación y Tronadura'],
       },
       {
         id: 'sec-103',
@@ -221,6 +225,7 @@ export const MINING_SITES: MiningSite[] = [
         sensorsCount: 4,
         generalStatus: 'normal',
         ventilationFanStatus: 'operativo_normal',
+        assignedCrews: ['Cuadrilla Geomecánica y Acuñadura'],
       },
       {
         id: 'sec-104',
@@ -232,6 +237,7 @@ export const MINING_SITES: MiningSite[] = [
         sensorsCount: 5,
         generalStatus: 'normal',
         ventilationFanStatus: 'operativo_normal',
+        assignedCrews: ['Cuadrilla Mantenimiento Planta'],
       },
       {
         id: 'sec-105',
@@ -243,6 +249,7 @@ export const MINING_SITES: MiningSite[] = [
         sensorsCount: 4,
         generalStatus: 'normal',
         ventilationFanStatus: 'operativo_normal',
+        assignedCrews: ['Cuadrilla Ventilación y Fortificación'],
       },
     ],
   },
@@ -251,9 +258,11 @@ export const MINING_SITES: MiningSite[] = [
     name: 'Faena Chuquicamata Subterránea',
     company: 'Codelco División Chuquicamata',
     location: 'Calama, Región de Antofagasta',
+    comuna: 'Calama',
     region: 'Antofagasta',
     type: 'subterranea',
     elevationMsl: 2870,
+    isPreloaded: true,
     activeSectors: [
       {
         id: 'sec-201',
@@ -265,6 +274,7 @@ export const MINING_SITES: MiningSite[] = [
         sensorsCount: 12,
         generalStatus: 'normal',
         ventilationFanStatus: 'operativo_normal',
+        assignedCrews: ['Cuadrilla Alfa - Turno Mañana', 'Cuadrilla Perforación y Tronadura'],
       },
       {
         id: 'sec-202',
@@ -276,6 +286,7 @@ export const MINING_SITES: MiningSite[] = [
         sensorsCount: 6,
         generalStatus: 'normal',
         ventilationFanStatus: 'operativo_normal',
+        assignedCrews: ['Cuadrilla Beta - Turno Tarde'],
       }
     ],
   },

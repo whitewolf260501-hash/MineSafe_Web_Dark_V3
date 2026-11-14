@@ -101,6 +101,7 @@ export interface MiningSector {
   sensorsCount: number;
   generalStatus: AlertSeverity;
   ventilationFanStatus: 'operativo_normal' | 'ventilacion_forzada' | 'en_mantencion' | 'detenido';
+  assignedCrews?: string[];
 }
 
 export interface MiningSite {
@@ -108,10 +109,12 @@ export interface MiningSite {
   name: string;
   company: string;
   location: string;
+  comuna?: string;
   region: string;
   type: 'subterranea' | 'rajo_abierto' | 'mixta';
   elevationMsl: number;
   activeSectors: MiningSector[];
+  isPreloaded?: boolean;
 }
 
 export type AlertResolutionType = 
