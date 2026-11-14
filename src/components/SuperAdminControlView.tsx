@@ -42,6 +42,7 @@ import {
   RegisteredDeviceConfig,
   SensorDevice,
   UserProfile,
+  UserRole,
   WindowOverrideValue
 } from '../types';
 import {
@@ -58,6 +59,8 @@ interface SuperAdminControlViewProps {
   usersList: UserProfile[];
   platformConfig: PlatformConfig;
   rtdbDevices?: SensorDevice[];
+  onUpdateUserRole?: (userId: string, newRole: UserRole) => void;
+  onToggleUserStatus?: (userId: string) => void;
 }
 
 const CONTROLLABLE_WINDOWS: Array<{
@@ -112,6 +115,8 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
   usersList,
   platformConfig,
   rtdbDevices = [],
+  onUpdateUserRole,
+  onToggleUserStatus,
 }) => {
   const [subTab, setSubTab] = useState<'windows' | 'metrics' | 'page' | 'devices'>('windows');
   const [draftConfig, setDraftConfig] = useState<PlatformConfig>(platformConfig);
@@ -841,15 +846,15 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
             </div>
           </div>
 
-          {/* RIGHT: PER-USER SPECIFIC WINDOW LOCKS / OVERRIDES */}
+          {/* RIGHT: ROLE MANAGEMENT & PER-USER SPECIFIC WINDOW LOCKS / OVERRIDES */}
           <div className="xl:col-span-5 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 flex flex-col">
             <div className="pb-3 border-b border-slate-800">
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <Users className="w-4 h-4 text-cyan-400" />
-                Bloqueo Individual por Usuario
+                Rol y Bloqueo Individual por Usuario
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Selecciona cualquier usuario para bloquearle o habilitarle ventanas puntuales por encima de las reglas de su rol.
+                Selecciona cualquier usuario para cambiar su rol (Operador o Administrador), activar/desactivar su cuenta o bloquearle ventanas puntuales.
               </p>
             </div>
 
@@ -904,7 +909,7 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
               </div>
             </div>
 
-            {/* Active Target User Override Matrix */}
+            {/* Active Target User Role & Override Matrix */}
             {activeTargetUser ? (
               <div className="flex-1 bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800">
@@ -913,7 +918,7 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                       {activeTargetUser.name}
                     </span>
                     <span className="text-[10px] text-cyan-400 font-semibold uppercase">
-                      Rol base: {activeTargetUser.role === 'admin' ? 'Administrador' : 'Usuario Normal (Operador)'}
+                      {activeTargetUser.email} · Rol: {activeTargetUser.role === 'admin' ? 'Administrador' : 'Usuario Normal (Operador)'}
                     </span>
                   </div>
                   <button
@@ -924,6 +929,80 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                     Restablecer al Rol
                   </button>
                 </div>
+
+                {/* Direct Role & Account Status Controls in Control Maestro */}
+                {(onUpdateUserRole || onToggleUserStatus) && (
+                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Asignar Rol en Plataforma
+                      </span>
+                      {onToggleUserStatus && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const willActivate = activeTargetUser.status !== 'activo';
+                            onToggleUserStatus(activeTargetUser.id);
+                            showNotice(
+                              'success',
+                              `Cuenta de ${activeTargetUser.name} ${willActivate ? 'activada' : 'desactivada'} en Firebase RTDB.`
+                            );
+                          }}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors ${
+                            activeTargetUser.status === 'activo'
+                              ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700 hover:bg-emerald-900/60'
+                              : 'bg-rose-950/70 text-rose-300 border-rose-700 hover:bg-rose-900/60'
+                          }`}
+                        >
+                          {activeTargetUser.status === 'activo' ? 'Cuenta Activa' : 'Cuenta Desactivada'}
+                        </button>
+                      )}
+                    </div>
+
+                    {onUpdateUserRole && (
+                      <div className="grid grid-cols-2 gap-2 text-[11px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (activeTargetUser.role === 'operador') return;
+                            onUpdateUserRole(activeTargetUser.id, 'operador');
+                            showNotice(
+                              'success',
+                              `Rol actualizado a Usuario Normal (Operador) para ${activeTargetUser.name}.`
+                            );
+                          }}
+                          className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-colors ${
+                            activeTargetUser.role === 'operador'
+                              ? 'bg-amber-600 text-white border-amber-400 shadow-sm'
+                              : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-amber-300 hover:border-amber-800'
+                          }`}
+                        >
+                          <HardHat className="w-3.5 h-3.5" />
+                          <span>Operador (Normal)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (activeTargetUser.role === 'admin') return;
+                            onUpdateUserRole(activeTargetUser.id, 'admin');
+                            showNotice(
+                              'success',
+                              `Permisos de Administrador otorgados a ${activeTargetUser.name}.`
+                            );
+                          }}
+                          className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-colors ${
+                            activeTargetUser.role === 'admin'
+                              ? 'bg-cyan-600 text-white border-cyan-400 shadow-sm'
+                              : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-cyan-300 hover:border-cyan-800'
+                          }`}
+                        >
+                          <Shield className="w-3.5 h-3.5" />
+                          <span>Administrador</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
                   {CONTROLLABLE_WINDOWS.map((win) => {

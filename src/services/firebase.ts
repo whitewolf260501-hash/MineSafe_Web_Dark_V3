@@ -881,52 +881,73 @@ export async function updateUserInRTDB(
   updates: Partial<UserProfile>,
   actingUser?: UserProfile | null
 ): Promise<void> {
-  try {
-    if (actingUser && actingUser.role !== 'superadmin' && actingUser.role !== 'admin') {
-      throw new Error('Permisos insuficientes para modificar usuarios.');
+  if (actingUser && actingUser.role !== 'superadmin' && actingUser.role !== 'admin') {
+    throw new Error('Permisos insuficientes para modificar usuarios.');
+  }
+
+  const userRef = ref(rtdb, `usuarios/${userId}`);
+  const existingSnap = await get(userRef).catch(() => null);
+  const existingData = existingSnap?.exists() ? existingSnap.val() : null;
+
+  const existingEmail = (existingData?.email || updates.email || '').trim().toLowerCase();
+  const isTargetSuperAdmin =
+    userId === PRIMARY_SUPERADMIN_UID ||
+    existingEmail === PRIMARY_SUPERADMIN_EMAIL ||
+    existingData?.isSuperUser === true ||
+    existingData?.tipoUsuario === 'superadmin';
+
+  // Protección absoluta: Nadie (ni un admin) puede quitarle permisos ni desactivar al único SuperAdmin
+  if (isTargetSuperAdmin) {
+    if ((updates.role && updates.role !== 'superadmin') || updates.status === 'inactivo') {
+      throw new Error('Acción denegada: No se pueden quitar permisos ni desactivar al SuperAdministrador.');
     }
+  }
 
-    const userRef = ref(rtdb, `usuarios/${userId}`);
-    const existingSnap = await get(userRef).catch(() => null);
-    const existingData = existingSnap?.exists() ? existingSnap.val() : null;
+  // Regla: Solo existe un SuperAdmin en toda la plataforma (no se puede promover a otro usuario a superadmin)
+  if (updates.role === 'superadmin' && !isTargetSuperAdmin) {
+    throw new Error('Acción denegada: Solo puede existir un único SuperAdministrador en toda la plataforma.');
+  }
 
-    const existingEmail = (existingData?.email || updates.email || '').toLowerCase();
-    const isTargetSuperAdmin =
-      userId === PRIMARY_SUPERADMIN_UID ||
-      existingEmail === PRIMARY_SUPERADMIN_EMAIL ||
-      existingData?.isSuperUser === true ||
-      existingData?.tipoUsuario === 'superadmin';
+  const rtdbUpdates: any = {
+    updatedAt: new Date().toISOString(),
+  };
+  if (updates.name) rtdbUpdates.nombre = updates.name;
+  if (updates.email) rtdbUpdates.email = updates.email;
+  if (updates.rut) rtdbUpdates.codigoId = updates.rut;
+  if (updates.role) {
+    rtdbUpdates.tipoUsuario = updates.role;
+    rtdbUpdates.isAdmin = updates.role === 'admin' || updates.role === 'superadmin';
+    rtdbUpdates.isSuperUser = updates.role === 'superadmin';
+  }
+  if (updates.status) rtdbUpdates.isActive = updates.status === 'activo';
+  if (updates.assignedSector) rtdbUpdates.geoMina = updates.assignedSector;
+  if (updates.assignedDeviceCode !== undefined) rtdbUpdates.deviceId = updates.assignedDeviceCode;
 
-    // Protección absoluta: Nadie (ni un admin) puede quitarle permisos ni desactivar al único SuperAdmin
-    if (isTargetSuperAdmin) {
-      if ((updates.role && updates.role !== 'superadmin') || updates.status === 'inactivo') {
-        throw new Error('Acción denegada: Un administrador no puede quitarle permisos ni desactivar al SuperAdministrador.');
+  try {
+    await update(userRef, rtdbUpdates);
+
+    // Sincronizar también cualquier otro nodo duplicado con el mismo correo en /usuarios
+    if (existingEmail) {
+      const allSnap = await get(ref(rtdb, 'usuarios')).catch(() => null);
+      if (allSnap?.exists()) {
+        const allUsers = allSnap.val() || {};
+        const siblingKeys = Object.keys(allUsers).filter(
+          (k) => k !== userId && (allUsers[k]?.email || '').trim().toLowerCase() === existingEmail
+        );
+        for (const sibKey of siblingKeys) {
+          await update(ref(rtdb, `usuarios/${sibKey}`), rtdbUpdates).catch(() => {});
+        }
       }
     }
-
-    // Regla: Solo existe un SuperAdmin en toda la plataforma (no se puede promover a otro usuario a superadmin)
-    if (updates.role === 'superadmin' && !isTargetSuperAdmin) {
-      throw new Error('Acción denegada: Solo puede existir un único SuperAdministrador en toda la plataforma.');
-    }
-
-    const rtdbUpdates: any = {
-      updatedAt: new Date().toISOString(),
-    };
-    if (updates.name) rtdbUpdates.nombre = updates.name;
-    if (updates.email) rtdbUpdates.email = updates.email;
-    if (updates.rut) rtdbUpdates.codigoId = updates.rut;
-    if (updates.role) {
-      rtdbUpdates.tipoUsuario = updates.role;
-      rtdbUpdates.isAdmin = updates.role === 'admin' || updates.role === 'superadmin';
-      rtdbUpdates.isSuperUser = updates.role === 'superadmin';
-    }
-    if (updates.status) rtdbUpdates.isActive = updates.status === 'activo';
-    if (updates.assignedSector) rtdbUpdates.geoMina = updates.assignedSector;
-    if (updates.assignedDeviceCode !== undefined) rtdbUpdates.deviceId = updates.assignedDeviceCode;
-
-    await update(userRef, rtdbUpdates);
-  } catch (err) {
+  } catch (err: any) {
     console.warn('Error updating user in RTDB:', err);
+    const rawMsg = String(err?.message || err || '');
+    if (rawMsg.toLowerCase().includes('permission') || rawMsg.toLowerCase().includes('denied')) {
+      throw new Error(
+        'Firebase RTDB rechazó actualizar el usuario (PERMISSION_DENIED). Verifica las Reglas de Realtime Database para el SuperAdmin.'
+      );
+    }
+    throw err;
   }
 }
 

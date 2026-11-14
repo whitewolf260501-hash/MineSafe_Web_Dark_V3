@@ -899,8 +899,10 @@ export default function App() {
         roleLabel: roleLabels[newRole],
       },
       currentUser
-    );
-  }, [currentUser, usersList]);
+    ).catch((err: any) => {
+      showAlarmFeedback(err?.message || 'Error al actualizar el rol del usuario en Firebase RTDB.', 'error');
+    });
+  }, [currentUser, usersList, showAlarmFeedback]);
 
   const handleToggleUserStatus = useCallback((userId: string) => {
     if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
@@ -935,8 +937,10 @@ export default function App() {
         status: nextStatus,
       },
       currentUser
-    );
-  }, [currentUser, usersList]);
+    ).catch((err: any) => {
+      showAlarmFeedback(err?.message || 'Error al actualizar estado del usuario en Firebase RTDB.', 'error');
+    });
+  }, [currentUser, usersList, showAlarmFeedback]);
 
   const handleLogin = useCallback((user: UserProfile) => {
     setCurrentUser(user);
@@ -1319,6 +1323,8 @@ export default function App() {
                 usersList={usersList}
                 platformConfig={platformConfig}
                 rtdbDevices={devices}
+                onUpdateUserRole={handleUpdateUserRole}
+                onToggleUserStatus={handleToggleUserStatus}
               />
             )}
           </>
