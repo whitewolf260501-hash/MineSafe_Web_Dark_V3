@@ -220,6 +220,7 @@ export interface PlatformVisibilityConfig {
     operador: Record<ControllableTab, boolean>;
   };
   userOverrides: Record<string, Partial<Record<ControllableTab, WindowOverrideValue>>>;
+  userOverridesByEmail?: Record<string, Partial<Record<ControllableTab, WindowOverrideValue>>>;
 }
 
 export interface PlatformMetricsConfig {

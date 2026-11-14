@@ -659,17 +659,26 @@ export function subscribeToRTDBUsers(callback: (users: UserProfile[]) => void): 
     const list: UserProfile[] = [];
     const seenEmails = new Set<string>();
 
-    // 1. Process direct usuarios (e.g. Manuel Crisostomo, PEPE LOTA, Gerardo Cuellar, usr001-020)
-    Object.keys(directUsers).forEach((key) => {
+    // 1. Process direct usuarios (priorizar UIDs reales de Firebase Auth / manual_temp_uid_01 frente a llaves temporales usr-*)
+    const sortedDirectKeys = Object.keys(directUsers).sort((a, b) => {
+      const aTemp = a.startsWith('usr-') || a.startsWith('usr0') ? 1 : 0;
+      const bTemp = b.startsWith('usr-') || b.startsWith('usr0') ? 1 : 0;
+      return aTemp - bTemp;
+    });
+    sortedDirectKeys.forEach((key) => {
       const u = mapRTDBUserToUserProfile(key, directUsers[key]);
-      if (u.email) seenEmails.add(u.email.toLowerCase());
+      const emailLower = (u.email || '').trim().toLowerCase();
+      if (emailLower && seenEmails.has(emailLower)) {
+        return;
+      }
+      if (emailLower) seenEmails.add(emailLower);
       list.push(u);
     });
 
     // 2. Process precarga usuarios
     Object.keys(precargaUsers).forEach((key) => {
       const pu = precargaUsers[key];
-      const email = (pu?.email || '').toLowerCase();
+      const email = (pu?.email || '').trim().toLowerCase();
       if (!seenEmails.has(email)) {
         if (email) seenEmails.add(email);
         list.push(mapRTDBUserToUserProfile(key, pu));
@@ -1639,6 +1648,7 @@ export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
       },
     },
     userOverrides: {},
+    userOverridesByEmail: {},
   },
   metrics: {
     coPreventivo: 300,
@@ -1704,6 +1714,11 @@ export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
   actualizado_por: 'SuperAdmin (Por defecto)',
 };
 
+export function normalizeEmailOverrideKey(email?: string | null): string {
+  if (!email) return '';
+  return email.trim().toLowerCase().replace(/[.#$/[\]]/g, '_');
+}
+
 export function isTabVisibleForUser(
   tab: NavigationTab,
   user: UserProfile | null,
@@ -1718,8 +1733,16 @@ export function isTabVisibleForUser(
   }
 
   const controllableTab = tab as ControllableTab;
-  const userOverride: WindowOverrideValue | undefined =
+  const emailKey = normalizeEmailOverrideKey(user.email);
+  const byIdOverride: WindowOverrideValue | undefined =
     config?.visibility?.userOverrides?.[user.id]?.[controllableTab];
+  const byEmailOverride: WindowOverrideValue | undefined =
+    emailKey ? config?.visibility?.userOverridesByEmail?.[emailKey]?.[controllableTab] : undefined;
+
+  const userOverride: WindowOverrideValue | undefined =
+    byIdOverride && byIdOverride !== 'inherit'
+      ? byIdOverride
+      : byEmailOverride;
 
   if (userOverride === 'allow') return true;
   if (userOverride === 'block') return false;
@@ -1747,6 +1770,7 @@ function mergePlatformConfig(raw: any): PlatformConfig {
         },
       },
       userOverrides: raw?.visibility?.userOverrides || {},
+      userOverridesByEmail: raw?.visibility?.userOverridesByEmail || {},
     },
     metrics: {
       ...DEFAULT_PLATFORM_CONFIG.metrics,
@@ -1852,13 +1876,25 @@ export async function savePlatformConfig(
     throw new Error('En Humedad: Preventivo debe ser menor que Advertencia y éste menor que Crítico.');
   }
 
-  const payload: PlatformConfig = {
-    ...config,
-    actualizado_en: Date.now(),
-    actualizado_por: `${actingUser.name} (SuperAdmin)`,
-  };
+  const payload: PlatformConfig = JSON.parse(
+    JSON.stringify({
+      ...config,
+      actualizado_en: Date.now(),
+      actualizado_por: `${actingUser.name} (SuperAdmin)`,
+    })
+  );
 
-  await set(ref(rtdb, 'configuracion_plataforma'), payload);
+  try {
+    await set(ref(rtdb, 'configuracion_plataforma'), payload);
+  } catch (err: any) {
+    const rawMsg = String(err?.message || err || '');
+    if (rawMsg.toLowerCase().includes('permission') || rawMsg.toLowerCase().includes('denied')) {
+      throw new Error(
+        'Firebase RTDB rechazó guardar en /configuracion_plataforma (PERMISSION_DENIED). Verifica en Realtime Database → Reglas del proyecto minefase-fc5f5 que el SuperAdmin tenga permiso de escritura.'
+      );
+    }
+    throw err;
+  }
 
   // Sincronizar también umbrales globales en /configuracion_alertas/global para el motor de alertas
   try {

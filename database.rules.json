@@ -27,13 +27,13 @@
       // Solo usuarios autenticados pueden consultar perfiles de la faena
       ".read": true,
       "$userId": {
-        ".write": "auth != null && (auth.uid === $userId || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || (root.child('usuarios/' + auth.uid + '/isAdmin').val() === true && data.child('isSuperUser').val() !== true && data.child('tipoUsuario').val() !== 'superadmin'))",
-        ".validate": "(!newData.child('isSuperUser').exists() || newData.child('isSuperUser').val() === false || $userId === 'manual_temp_uid_01') && (newData.child('tipoUsuario').val() !== 'superadmin' || $userId === 'manual_temp_uid_01')"
+        ".write": "auth != null && (auth.uid === $userId || auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || (root.child('usuarios/' + auth.uid + '/isAdmin').val() === true && data.child('isSuperUser').val() !== true && data.child('tipoUsuario').val() !== 'superadmin'))",
+        ".validate": "(!newData.child('isSuperUser').exists() || newData.child('isSuperUser').val() === false || $userId === 'manual_temp_uid_01' || auth.token.email === 'manuelcrisostomovega@gmail.com') && (newData.child('tipoUsuario').val() !== 'superadmin' || $userId === 'manual_temp_uid_01' || auth.token.email === 'manuelcrisostomovega@gmail.com')"
       }
     },
     "contratos": {
       ".read": "auth != null",
-      ".write": "auth != null && root.child('usuarios/' + auth.uid + '/isAdmin').val() === true"
+      ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true)"
     },
     "alertas": {
       ".read": true,
@@ -75,9 +75,9 @@
     },
     "configuracion_plataforma": {
       // Todos los clientes leen reglas de visibilidad y métricas globales en tiempo real;
-      // solo el SuperAdmin (o escritura firmada desde consola SuperAdmin) modifica este nodo
+      // solo el SuperAdmin modifica este nodo
       ".read": true,
-      ".write": "auth != null ? (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin') : newData.hasChildren(['visibility', 'metrics', 'appearance', 'actualizado_en'])",
+      ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin')",
       ".validate": "newData.hasChildren(['visibility', 'metrics', 'appearance'])"
     }
   }

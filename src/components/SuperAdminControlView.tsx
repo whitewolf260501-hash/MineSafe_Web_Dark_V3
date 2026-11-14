@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Crown,
   Lock,
@@ -48,7 +48,8 @@ import {
   DEFAULT_PLATFORM_CONFIG,
   savePlatformConfig,
   resetPlatformConfigToDefault,
-  initializeRegisteredDeviceInRTDB
+  initializeRegisteredDeviceInRTDB,
+  normalizeEmailOverrideKey
 } from '../services/firebase';
 import { soundAlert } from '../services/audioAlert';
 
@@ -114,6 +115,11 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
 }) => {
   const [subTab, setSubTab] = useState<'windows' | 'metrics' | 'page' | 'devices'>('windows');
   const [draftConfig, setDraftConfig] = useState<PlatformConfig>(platformConfig);
+  const draftConfigRef = useRef<PlatformConfig>(platformConfig);
+  const activeSaveCountRef = useRef<number>(0);
+  const visibilityQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const [visibilitySyncState, setVisibilitySyncState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [visibilitySyncError, setVisibilitySyncError] = useState<string | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [userSearch, setUserSearch] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -131,7 +137,10 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
 
   useEffect(() => {
-    setDraftConfig(JSON.parse(JSON.stringify(platformConfig)));
+    if (activeSaveCountRef.current > 0) return;
+    const cloned = JSON.parse(JSON.stringify(platformConfig));
+    draftConfigRef.current = cloned;
+    setDraftConfig(cloned);
   }, [platformConfig]);
 
   // Seguridad estricta: solo el único SuperAdmin puede ver/usar este panel
@@ -165,9 +174,38 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
     setTimeout(() => setFeedback(null), 5000);
   };
 
+  const commitVisibilityChange = (updater: (prev: PlatformConfig) => PlatformConfig) => {
+    const nextConfig = updater(draftConfigRef.current);
+    draftConfigRef.current = nextConfig;
+    setDraftConfig(nextConfig);
+    setVisibilitySyncState('saving');
+    setVisibilitySyncError(null);
+    activeSaveCountRef.current += 1;
+
+    visibilityQueueRef.current = visibilityQueueRef.current
+      .then(async () => {
+        await savePlatformConfig(nextConfig, currentUser);
+      })
+      .then(() => {
+        if (activeSaveCountRef.current <= 1) {
+          setVisibilitySyncState('saved');
+          setVisibilitySyncError(null);
+        }
+      })
+      .catch((err: any) => {
+        const msg = err?.message || 'Error al guardar el bloqueo de ventanas en Firebase RTDB.';
+        setVisibilitySyncState('error');
+        setVisibilitySyncError(msg);
+        showNotice('error', msg);
+      })
+      .finally(() => {
+        activeSaveCountRef.current = Math.max(0, activeSaveCountRef.current - 1);
+      });
+  };
+
   const handleToggleRoleWindow = (role: 'admin' | 'operador', tabId: ControllableTab) => {
     soundAlert.playFeedbackBeep();
-    setDraftConfig((prev) => ({
+    commitVisibilityChange((prev) => ({
       ...prev,
       visibility: {
         ...prev.visibility,
@@ -185,7 +223,7 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
   const handleSetAllRoleWindows = (role: 'admin' | 'operador', allowed: boolean) => {
     soundAlert.playFeedbackBeep();
     const updated: Record<ControllableTab, boolean> = {
-      dashboard: allowed || true, // Mantener dashboard como mínimo seguro si se bloquean todas
+      dashboard: allowed,
       monitoreo: allowed,
       alertas: allowed,
       configuracion_alertas: allowed,
@@ -194,10 +232,7 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
       faenas: allowed,
       usuarios: allowed,
     };
-    if (!allowed) {
-      updated.dashboard = false;
-    }
-    setDraftConfig((prev) => ({
+    commitVisibilityChange((prev) => ({
       ...prev,
       visibility: {
         ...prev.visibility,
@@ -210,44 +245,68 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
   };
 
   const handleUserWindowOverride = (
-    userId: string,
+    targetUser: UserProfile,
     tabId: ControllableTab,
     value: WindowOverrideValue
   ) => {
     soundAlert.playFeedbackBeep();
-    setDraftConfig((prev) => {
+    const emailKey = normalizeEmailOverrideKey(targetUser.email);
+    commitVisibilityChange((prev) => {
       const nextOverrides = { ...(prev.visibility.userOverrides || {}) };
-      const userMap = { ...(nextOverrides[userId] || {}) };
+      const userMap = { ...(nextOverrides[targetUser.id] || {}) };
       if (value === 'inherit') {
         delete userMap[tabId];
       } else {
         userMap[tabId] = value;
       }
       if (Object.keys(userMap).length === 0) {
-        delete nextOverrides[userId];
+        delete nextOverrides[targetUser.id];
       } else {
-        nextOverrides[userId] = userMap;
+        nextOverrides[targetUser.id] = userMap;
+      }
+
+      const nextEmailOverrides = { ...(prev.visibility.userOverridesByEmail || {}) };
+      if (emailKey) {
+        const emailMap = { ...(nextEmailOverrides[emailKey] || {}) };
+        if (value === 'inherit') {
+          delete emailMap[tabId];
+        } else {
+          emailMap[tabId] = value;
+        }
+        if (Object.keys(emailMap).length === 0) {
+          delete nextEmailOverrides[emailKey];
+        } else {
+          nextEmailOverrides[emailKey] = emailMap;
+        }
+      }
+
+      return {
+        ...prev,
+        visibility: {
+          ...prev.visibility,
+          userOverrides: nextOverrides,
+          userOverridesByEmail: nextEmailOverrides,
+        },
+      };
+    });
+  };
+
+  const handleClearUserOverrides = (targetUser: UserProfile) => {
+    soundAlert.playFeedbackBeep();
+    const emailKey = normalizeEmailOverrideKey(targetUser.email);
+    commitVisibilityChange((prev) => {
+      const nextOverrides = { ...(prev.visibility.userOverrides || {}) };
+      delete nextOverrides[targetUser.id];
+      const nextEmailOverrides = { ...(prev.visibility.userOverridesByEmail || {}) };
+      if (emailKey) {
+        delete nextEmailOverrides[emailKey];
       }
       return {
         ...prev,
         visibility: {
           ...prev.visibility,
           userOverrides: nextOverrides,
-        },
-      };
-    });
-  };
-
-  const handleClearUserOverrides = (userId: string) => {
-    soundAlert.playFeedbackBeep();
-    setDraftConfig((prev) => {
-      const nextOverrides = { ...(prev.visibility.userOverrides || {}) };
-      delete nextOverrides[userId];
-      return {
-        ...prev,
-        visibility: {
-          ...prev.visibility,
-          userOverrides: nextOverrides,
+          userOverridesByEmail: nextEmailOverrides,
         },
       };
     });
@@ -608,7 +667,44 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
           TAB 1: VISIBILIDAD Y BLOQUEO DE VENTANAS POR ROL Y POR USUARIO
          ===================================================================== */}
       {subTab === 'windows' && (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+        <div className="space-y-4">
+          {/* Live auto-save status bar for window locks */}
+          <div
+            className={`px-4 py-2.5 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 ${
+              visibilitySyncState === 'error'
+                ? 'bg-rose-950/80 border-rose-700 text-rose-100'
+                : visibilitySyncState === 'saving'
+                ? 'bg-amber-950/70 border-amber-700/80 text-amber-200'
+                : 'bg-emerald-950/40 border-emerald-800/70 text-emerald-200'
+            }`}
+          >
+            <div className="flex items-center gap-2 font-semibold">
+              {visibilitySyncState === 'error' ? (
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              ) : visibilitySyncState === 'saving' ? (
+                <Lock className="w-4 h-4 text-amber-300 animate-pulse shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              )}
+              <span>
+                {visibilitySyncState === 'error'
+                  ? visibilitySyncError || 'Error al guardar bloqueos de pantallas en Firebase RTDB.'
+                  : visibilitySyncState === 'saving'
+                  ? 'Aplicando y guardando bloqueo de pantallas en Firebase RTDB...'
+                  : 'Guardado automático en tiempo real activo: cualquier bloqueo por rol o usuario se aplica al instante en Firebase RTDB.'}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveAll}
+              disabled={isSaving}
+              className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-[11px] shrink-0"
+            >
+              {isSaving ? 'Guardando...' : 'Forzar Sincronización'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
           {/* LEFT: MATRIX BY ROLE */}
           <div className="xl:col-span-7 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -773,9 +869,12 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
               <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
                 {filteredUsers.map((u) => {
                   const isSelected = activeTargetUser?.id === u.id;
-                  const customCount = Object.keys(
-                    draftConfig.visibility.userOverrides?.[u.id] || {}
-                  ).length;
+                  const emailKey = normalizeEmailOverrideKey(u.email);
+                  const byIdKeys = Object.keys(draftConfig.visibility.userOverrides?.[u.id] || {});
+                  const byEmailKeys = emailKey
+                    ? Object.keys(draftConfig.visibility.userOverridesByEmail?.[emailKey] || {})
+                    : [];
+                  const customCount = new Set([...byIdKeys, ...byEmailKeys]).size;
 
                   return (
                     <button
@@ -819,7 +918,7 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleClearUserOverrides(activeTargetUser.id)}
+                    onClick={() => handleClearUserOverrides(activeTargetUser)}
                     className="text-[11px] text-slate-400 hover:text-white underline shrink-0"
                   >
                     Restablecer al Rol
@@ -830,9 +929,13 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                   {CONTROLLABLE_WINDOWS.map((win) => {
                     const roleKey = activeTargetUser.role === 'admin' ? 'admin' : 'operador';
                     const roleDefault = draftConfig.visibility.rolePermissions[roleKey][win.id];
+                    const activeEmailKey = normalizeEmailOverrideKey(activeTargetUser.email);
+                    const byIdVal = draftConfig.visibility.userOverrides?.[activeTargetUser.id]?.[win.id];
+                    const byEmailVal = activeEmailKey
+                      ? draftConfig.visibility.userOverridesByEmail?.[activeEmailKey]?.[win.id]
+                      : undefined;
                     const currentOverride: WindowOverrideValue =
-                      draftConfig.visibility.userOverrides?.[activeTargetUser.id]?.[win.id] ||
-                      'inherit';
+                      (byIdVal && byIdVal !== 'inherit' ? byIdVal : byEmailVal) || 'inherit';
 
                     return (
                       <div
@@ -852,7 +955,7 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                           <button
                             type="button"
                             onClick={() =>
-                              handleUserWindowOverride(activeTargetUser.id, win.id, 'inherit')
+                              handleUserWindowOverride(activeTargetUser, win.id, 'inherit')
                             }
                             className={`px-2 py-1 rounded border transition-colors ${
                               currentOverride === 'inherit'
@@ -865,7 +968,7 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                           <button
                             type="button"
                             onClick={() =>
-                              handleUserWindowOverride(activeTargetUser.id, win.id, 'allow')
+                              handleUserWindowOverride(activeTargetUser, win.id, 'allow')
                             }
                             className={`px-2 py-1 rounded border transition-colors ${
                               currentOverride === 'allow'
@@ -878,7 +981,7 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                           <button
                             type="button"
                             onClick={() =>
-                              handleUserWindowOverride(activeTargetUser.id, win.id, 'block')
+                              handleUserWindowOverride(activeTargetUser, win.id, 'block')
                             }
                             className={`px-2 py-1 rounded border flex items-center gap-1 transition-colors ${
                               currentOverride === 'block'
@@ -901,6 +1004,7 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
               </div>
             )}
           </div>
+        </div>
         </div>
       )}
 
