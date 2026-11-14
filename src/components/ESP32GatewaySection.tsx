@@ -75,19 +75,21 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  // Filter two main ESP32 devices
-  const esp32Devices = devices.filter(
-    d => d.id === 'device_A4CB2F124B00' || d.id === 'device_38A839E81F84' || d.id.startsWith('device_') || d.id.startsWith('NODO')
-  );
+  // Todos los dispositivos activos (Sensores y Gateways registrados)
+  const currentDevice = devices.find(d => d.id === activeDeviceId) || devices[0];
 
-  const currentDevice = devices.find(d => d.id === activeDeviceId) || esp32Devices[0] || devices[0];
+  useEffect(() => {
+    if (currentDevice?.localIp) {
+      setLocalIp(currentDevice.localIp);
+    }
+  }, [currentDevice?.id, currentDevice?.localIp]);
 
-  // 15 seconds rule calculation
-  const serverTime = currentDevice?.lastUpdateServer || (currentDevice ? nowTimestamp - 6000 : 0);
+  // 20 seconds rule calculation
+  const serverTime = currentDevice?.lastUpdateServer || 0;
   const diffSeconds = serverTime > 0 ? Math.floor(Math.abs(nowTimestamp - serverTime) / 1000) : 999;
-  
-  // Connection status: must be under 15 seconds
-  const isOnline = diffSeconds <= 15 || isSimulatingHeartbeat;
+
+  // Connection status: live RTDB packet within 20 seconds or gatewayOnline flag
+  const isOnline = Boolean(currentDevice?.gatewayOnline) || (serverTime > 0 && diffSeconds <= 20) || isSimulatingHeartbeat;
 
   // Format date and time
   const formatReportDate = (timestamp: number) => {
@@ -266,53 +268,49 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
                 )}
               </div>
               <p className="text-xs text-slate-400">
-                Arquitectura de doble nodo con enlace RF/WiFi y sincronización a Firebase Realtime Database.
+                {devices.length === 1
+                  ? 'Nodo único activo con sincronización en tiempo real hacia Firebase Realtime Database (agrega más sensores o gateways desde Control Maestro).'
+                  : `${devices.length} dispositivos activos (sensores y gateways) sincronizados en tiempo real con Firebase Realtime Database.`}
               </p>
             </div>
           </div>
         </div>
 
-        {/* Dual Device Architecture Selector Tabs */}
-        <div className="flex items-center gap-1.5 p-1 bg-slate-950 rounded-xl border border-slate-800 self-start lg:self-center">
-          <button
-            type="button"
-            onClick={() => onSelectDevice('device_A4CB2F124B00')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 ${
-              activeDeviceId === 'device_A4CB2F124B00'
-                ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Radio className="w-3.5 h-3.5" />
-            <span>Dispositivo 1: 4B00 (San José)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onSelectDevice('device_38A839E81F84')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 ${
-              activeDeviceId === 'device_38A839E81F84'
-                ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Radio className="w-3.5 h-3.5" />
-            <span>Dispositivo 2: 1F84 (Chuquicamata)</span>
-          </button>
-
-          {devices.some(d => d.id === 'NODO_U-01') && (
-            <button
-              type="button"
-              onClick={() => onSelectDevice('NODO_U-01')}
-              className={`px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-all hidden sm:flex items-center gap-1 ${
-                activeDeviceId === 'NODO_U-01'
-                  ? 'bg-cyan-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <span>Nodo U-01</span>
-            </button>
-          )}
+        {/* Dynamic Registered Devices Selector Tabs */}
+        <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-950 rounded-xl border border-slate-800 self-start lg:self-center">
+          {devices.map((dev) => {
+            const isSelected = currentDevice?.id === dev.id;
+            const catLabel =
+              dev.deviceCategory === 'gateway'
+                ? 'Gateway'
+                : dev.deviceCategory === 'sensor'
+                ? 'Sensor'
+                : 'Gateway + Sensor';
+            return (
+              <button
+                key={dev.id}
+                type="button"
+                onClick={() => onSelectDevice(dev.id)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 ${
+                  isSelected
+                    ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {dev.deviceCategory === 'gateway' ? (
+                  <Server className="w-3.5 h-3.5" />
+                ) : (
+                  <Radio className="w-3.5 h-3.5" />
+                )}
+                <span className="truncate max-w-[190px]">{dev.name}</span>
+                <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${
+                  isSelected ? 'bg-black/25 text-cyan-100' : 'bg-slate-800 text-slate-400'
+                }`}>
+                  {catLabel}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -366,7 +364,7 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
           <div className="my-2">
             <div className="flex items-center gap-2">
               <span className="text-sm sm:text-base font-mono font-extrabold text-white tracking-wide truncate">
-                {currentDevice?.id || 'device_A4CB2F124B00'}
+                {currentDevice?.id || 'device_38A839E81F84'}
               </span>
               <button
                 type="button"

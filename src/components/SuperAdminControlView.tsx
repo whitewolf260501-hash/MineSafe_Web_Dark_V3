@@ -25,18 +25,30 @@ import {
   HardHat,
   Cpu,
   Volume2,
-  Battery
+  Battery,
+  Radio,
+  Server,
+  Plus,
+  Trash2,
+  Edit3,
+  Wifi,
+  WifiOff,
+  Check
 } from 'lucide-react';
 import {
   ControllableTab,
+  DeviceCategory,
   PlatformConfig,
+  RegisteredDeviceConfig,
+  SensorDevice,
   UserProfile,
   WindowOverrideValue
 } from '../types';
 import {
   DEFAULT_PLATFORM_CONFIG,
   savePlatformConfig,
-  resetPlatformConfigToDefault
+  resetPlatformConfigToDefault,
+  initializeRegisteredDeviceInRTDB
 } from '../services/firebase';
 import { soundAlert } from '../services/audioAlert';
 
@@ -44,6 +56,7 @@ interface SuperAdminControlViewProps {
   currentUser: UserProfile;
   usersList: UserProfile[];
   platformConfig: PlatformConfig;
+  rtdbDevices?: SensorDevice[];
 }
 
 const CONTROLLABLE_WINDOWS: Array<{
@@ -97,14 +110,25 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
   currentUser,
   usersList,
   platformConfig,
+  rtdbDevices = [],
 }) => {
-  const [subTab, setSubTab] = useState<'windows' | 'metrics' | 'page'>('windows');
+  const [subTab, setSubTab] = useState<'windows' | 'metrics' | 'page' | 'devices'>('windows');
   const [draftConfig, setDraftConfig] = useState<PlatformConfig>(platformConfig);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [userSearch, setUserSearch] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Estado del formulario para agregar o editar Sensores y Gateways
+  const [newDevId, setNewDevId] = useState('');
+  const [newDevName, setNewDevName] = useState('');
+  const [newDevCategory, setNewDevCategory] = useState<DeviceCategory>('sensor');
+  const [newDevSector, setNewDevSector] = useState('Mina Chuquicamata - Rampa Principal');
+  const [newDevParentGateway, setNewDevParentGateway] = useState('device_38A839E81F84');
+  const [newDevLocalIp, setNewDevLocalIp] = useState('192.168.4.1');
+  const [initNodeInRTDB, setInitNodeInRTDB] = useState(true);
+  const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
 
   useEffect(() => {
     setDraftConfig(JSON.parse(JSON.stringify(platformConfig)));
@@ -252,6 +276,140 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
     }));
   };
 
+  const registeredDevices = draftConfig.registeredDevices || [];
+  const gatewayOptions = registeredDevices.filter(
+    (d) => d.category === 'gateway' || d.category === 'gateway_sensor'
+  );
+  const unregisteredRTDBDevices = rtdbDevices.filter(
+    (rt) => !registeredDevices.some((reg) => reg.id === rt.id)
+  );
+
+  const handleAddOrUpdateDevice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanId = newDevId.trim().replace(/[.#$/[\]]/g, '_');
+    const cleanName = newDevName.trim();
+    if (!cleanId || !cleanName) {
+      showNotice('error', 'Debes ingresar un ID de Firebase válido y un nombre para el dispositivo.');
+      return;
+    }
+
+    const exists = registeredDevices.some((d) => d.id === cleanId);
+    if (!editingDeviceId && exists) {
+      showNotice('error', `Ya existe un dispositivo registrado con el ID "${cleanId}".`);
+      return;
+    }
+
+    const deviceEntry: RegisteredDeviceConfig = {
+      id: cleanId,
+      name: cleanName,
+      category: newDevCategory,
+      sectorName: newDevSector.trim() || 'Faena Central',
+      parentGatewayId:
+        newDevCategory === 'sensor' && newDevParentGateway.trim()
+          ? newDevParentGateway.trim()
+          : undefined,
+      localIp: newDevLocalIp.trim() || '192.168.4.1',
+      enabled: true,
+      createdAt: editingDeviceId
+        ? registeredDevices.find((d) => d.id === editingDeviceId)?.createdAt || Date.now()
+        : Date.now(),
+    };
+
+    const nextDevices = editingDeviceId
+      ? registeredDevices.map((d) => (d.id === editingDeviceId ? deviceEntry : d))
+      : [...registeredDevices, deviceEntry];
+
+    const nextConfig: PlatformConfig = {
+      ...draftConfig,
+      registeredDevices: nextDevices,
+    };
+
+    setIsSaving(true);
+    try {
+      await savePlatformConfig(nextConfig, currentUser);
+      if (initNodeInRTDB) {
+        await initializeRegisteredDeviceInRTDB(deviceEntry, currentUser);
+      }
+      setDraftConfig(nextConfig);
+      setNewDevId('');
+      setNewDevName('');
+      setEditingDeviceId(null);
+      soundAlert.playFeedbackBeep();
+      showNotice(
+        'success',
+        editingDeviceId
+          ? `Dispositivo "${cleanName}" actualizado en la plataforma y Firebase.`
+          : `Dispositivo "${cleanName}" (${cleanId}) agregado y activado en tiempo real.`
+      );
+    } catch (err: any) {
+      showNotice('error', err?.message || 'Error al registrar el dispositivo.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleImportRTDBDevice = async (rtDev: SensorDevice, category: DeviceCategory) => {
+    const newEntry: RegisteredDeviceConfig = {
+      id: rtDev.id,
+      name: rtDev.name || rtDev.id,
+      category,
+      sectorName: rtDev.sectorName || 'Faena Central',
+      parentGatewayId: category === 'sensor' ? gatewayOptions[0]?.id || undefined : undefined,
+      localIp: rtDev.localIp || '192.168.4.1',
+      enabled: true,
+      createdAt: Date.now(),
+    };
+
+    const nextConfig: PlatformConfig = {
+      ...draftConfig,
+      registeredDevices: [...registeredDevices, newEntry],
+    };
+
+    setIsSaving(true);
+    try {
+      await savePlatformConfig(nextConfig, currentUser);
+      setDraftConfig(nextConfig);
+      soundAlert.playFeedbackBeep();
+      showNotice('success', `Nodo "${rtDev.id}" activado en la plataforma.`);
+    } catch (err: any) {
+      showNotice('error', err?.message || 'No se pudo activar el nodo detectado.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleToggleDeviceEnabled = (deviceId: string) => {
+    soundAlert.playFeedbackBeep();
+    setDraftConfig((prev) => ({
+      ...prev,
+      registeredDevices: (prev.registeredDevices || []).map((d) =>
+        d.id === deviceId ? { ...d, enabled: !d.enabled } : d
+      ),
+    }));
+  };
+
+  const handleDeleteRegisteredDevice = (deviceId: string) => {
+    if ((draftConfig.registeredDevices || []).length <= 1) {
+      showNotice('error', 'Debe permanecer al menos 1 dispositivo registrado en la plataforma.');
+      return;
+    }
+    soundAlert.playFeedbackBeep();
+    setDraftConfig((prev) => ({
+      ...prev,
+      registeredDevices: (prev.registeredDevices || []).filter((d) => d.id !== deviceId),
+    }));
+  };
+
+  const handleStartEditDevice = (dev: RegisteredDeviceConfig) => {
+    setEditingDeviceId(dev.id);
+    setNewDevId(dev.id);
+    setNewDevName(dev.name);
+    setNewDevCategory(dev.category);
+    setNewDevSector(dev.sectorName);
+    setNewDevParentGateway(dev.parentGatewayId || '');
+    setNewDevLocalIp(dev.localIp || '192.168.4.1');
+  };
+
   const handleSaveAll = async () => {
     setIsSaving(true);
     try {
@@ -390,6 +548,22 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
           >
             <Layout className="w-4 h-4 text-emerald-400" />
             <span>Configuración General de la Página</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSubTab('devices')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-colors border ${
+              subTab === 'devices'
+                ? 'bg-amber-950/90 text-amber-200 border-amber-500 shadow-sm'
+                : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-white'
+            }`}
+          >
+            <Cpu className="w-4 h-4 text-amber-400" />
+            <span>Dispositivos (Sensores y Gateways)</span>
+            <span className="px-1.5 py-0.5 rounded bg-black/40 text-[10px] font-mono">
+              {registeredDevices.filter((d) => d.enabled).length}
+            </span>
           </button>
         </div>
       </div>
@@ -1254,6 +1428,355 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* SUB-TAB 4: GESTIÓN DE DISPOSITIVOS (SENSORES Y GATEWAYS)             */}
+      {/* ==================================================================== */}
+      {subTab === 'devices' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Columna Izquierda: Formulario para agregar Sensor o Gateway */}
+          <div className="lg:col-span-5 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4">
+            <div className="pb-3 border-b border-slate-800 flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-amber-400" />
+                  {editingDeviceId ? 'Editar Dispositivo' : 'Agregar Sensor o Gateway'}
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Registra nuevos nodos sensores (MQ-2/PM2.5/DHT11) o Gateways ESP-NOW para habilitarlos en toda la plataforma.
+                </p>
+              </div>
+              {editingDeviceId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingDeviceId(null);
+                    setNewDevId('');
+                    setNewDevName('');
+                  }}
+                  className="text-[11px] text-slate-400 hover:text-white underline"
+                >
+                  Cancelar edición
+                </button>
+              )}
+            </div>
+
+            <form onSubmit={handleAddOrUpdateDevice} className="space-y-3.5 text-xs">
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1.5">Tipo de Dispositivo</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      { id: 'sensor', label: 'Nodo Sensor', icon: <Radio className="w-3.5 h-3.5" /> },
+                      { id: 'gateway', label: 'Gateway Central', icon: <Server className="w-3.5 h-3.5" /> },
+                      { id: 'gateway_sensor', label: 'Híbrido', icon: <Cpu className="w-3.5 h-3.5" /> },
+                    ] as Array<{ id: DeviceCategory; label: string; icon: React.ReactNode }>
+                  ).map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setNewDevCategory(cat.id)}
+                      className={`p-2 rounded-xl border font-bold flex flex-col items-center gap-1 transition-colors ${
+                        newDevCategory === cat.id
+                          ? 'bg-amber-950/80 border-amber-500 text-amber-200'
+                          : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {cat.icon}
+                      <span className="text-[11px]">{cat.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">
+                  ID del Nodo en Firebase (<span className="font-mono text-cyan-400">/dispositivos/ID</span>)
+                </label>
+                <input
+                  type="text"
+                  value={newDevId}
+                  onChange={(e) => setNewDevId(e.target.value)}
+                  disabled={Boolean(editingDeviceId)}
+                  placeholder="Ej: device_B4E62D901122 o NODO_SENSOR_02"
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono disabled:opacity-60"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">Nombre Visible</label>
+                <input
+                  type="text"
+                  value={newDevName}
+                  onChange={(e) => setNewDevName(e.target.value)}
+                  placeholder="Ej: Sensor Galería Sur 02 / Gateway Nivel -400"
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">Sector / Faena Asignada</label>
+                <input
+                  type="text"
+                  value={newDevSector}
+                  onChange={(e) => setNewDevSector(e.target.value)}
+                  placeholder="Mina Chuquicamata - Rampa Principal"
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white"
+                />
+              </div>
+
+              {newDevCategory === 'sensor' && (
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">
+                    Enlace Gateway ESP-NOW (Opcional)
+                  </label>
+                  <select
+                    value={newDevParentGateway}
+                    onChange={(e) => setNewDevParentGateway(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white"
+                  >
+                    <option value="">Wi-Fi Directo a Firebase (sin Gateway intermedio)</option>
+                    {gatewayOptions.map((gw) => (
+                      <option key={gw.id} value={gw.id}>
+                        Vía Gateway: {gw.name} ({gw.id})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">IP Local WebServer ESP32</label>
+                <input
+                  type="text"
+                  value={newDevLocalIp}
+                  onChange={(e) => setNewDevLocalIp(e.target.value)}
+                  placeholder="192.168.4.1"
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-cyan-300 font-mono"
+                />
+              </div>
+
+              <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={initNodeInRTDB}
+                  onChange={(e) => setInitNodeInRTDB(e.target.checked)}
+                  className="rounded border-slate-600 bg-slate-900 text-amber-500"
+                />
+                <span className="text-[11px] text-slate-300">
+                  Crear / actualizar automáticamente el nodo en Firebase RTDB (<span className="font-mono">/dispositivos</span>)
+                </span>
+              </label>
+
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="w-full py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-black flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {editingDeviceId ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                <span>
+                  {isSaving
+                    ? 'Guardando en Firebase...'
+                    : editingDeviceId
+                    ? 'Guardar Cambios del Dispositivo'
+                    : 'Agregar Dispositivo a la Plataforma'}
+                </span>
+              </button>
+            </form>
+          </div>
+
+          {/* Columna Derecha: Lista de Dispositivos Activos y Detectados */}
+          <div className="lg:col-span-7 space-y-5">
+            {/* Filtro de Modo Único / Controlado */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-white">
+                  Modo Lista Controlada de Dispositivos
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Cuando está activo, la página muestra únicamente los dispositivos habilitados aquí (ideal para trabajar con 1 solo dispositivo ahora e ir sumando más luego).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  soundAlert.playFeedbackBeep();
+                  setDraftConfig((prev) => ({
+                    ...prev,
+                    onlyShowRegisteredDevices: !prev.onlyShowRegisteredDevices,
+                  }));
+                }}
+                className={`px-3.5 py-2 rounded-xl font-bold text-xs border shrink-0 transition-colors ${
+                  draftConfig.onlyShowRegisteredDevices
+                    ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600'
+                    : 'bg-slate-950 text-slate-300 border-slate-700'
+                }`}
+              >
+                {draftConfig.onlyShowRegisteredDevices ? 'Activo: Solo Registrados' : 'Desactivado: Mostrar Todos RTDB'}
+              </button>
+            </div>
+
+            {/* Dispositivos Registrados */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-cyan-400" />
+                  Dispositivos Configurados ({registeredDevices.length})
+                </h3>
+                <span className="text-[11px] text-slate-400">
+                  Recuerda pulsar <strong className="text-purple-300">Guardar Todos los Cambios</strong> si ocultas o eliminas nodos.
+                </span>
+              </div>
+
+              <div className="space-y-2.5">
+                {registeredDevices.map((dev) => {
+                  const live = rtdbDevices.find((r) => r.id === dev.id);
+                  const isOnline = Boolean(live?.gatewayOnline);
+                  return (
+                    <div
+                      key={dev.id}
+                      className={`p-3.5 rounded-xl border transition-colors ${
+                        dev.enabled
+                          ? 'bg-slate-950/80 border-slate-800'
+                          : 'bg-slate-950/30 border-slate-900 opacity-60'
+                      }`}
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-bold text-sm text-white truncate">{dev.name}</span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
+                                dev.category === 'gateway'
+                                  ? 'bg-purple-950/80 text-purple-300 border-purple-700'
+                                  : dev.category === 'sensor'
+                                  ? 'bg-cyan-950/80 text-cyan-300 border-cyan-700'
+                                  : 'bg-amber-950/80 text-amber-300 border-amber-700'
+                              }`}
+                            >
+                              {dev.category === 'gateway'
+                                ? 'Gateway Central'
+                                : dev.category === 'sensor'
+                                ? 'Nodo Sensor'
+                                : 'Gateway + Sensores'}
+                            </span>
+                            {live && (
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  isOnline
+                                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                                    : 'bg-slate-900 text-slate-400 border border-slate-700'
+                                }`}
+                              >
+                                {isOnline ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+                                {isOnline ? 'En línea' : 'Desconectado'}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-mono mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span>ID: {dev.id}</span>
+                            <span>• Sector: {dev.sectorName}</span>
+                            {dev.parentGatewayId && <span>• Vía Gateway: {dev.parentGatewayId}</span>}
+                          </div>
+                          {live && (
+                            <div className="text-[11px] text-slate-300 font-mono mt-1.5 bg-slate-900/90 px-2.5 py-1 rounded border border-slate-800 inline-flex flex-wrap gap-3">
+                              <span>CO: <strong className="text-cyan-300">{live.rawCO ?? live.metrics.co}</strong></span>
+                              <span>PM2.5: <strong className="text-amber-300">{live.rawPM25 ?? live.metrics.polvoPM}</strong></span>
+                              <span>Temp: <strong className="text-emerald-300">{live.metrics.temperatura}°C</strong></span>
+                              <span>Hum: <strong className="text-blue-300">{live.metrics.humedad}%</strong></span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleDeviceEnabled(dev.id)}
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border ${
+                              dev.enabled
+                                ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700'
+                                : 'bg-slate-900 text-slate-400 border-slate-700'
+                            }`}
+                          >
+                            {dev.enabled ? 'Activo' : 'Oculto'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditDevice(dev)}
+                            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700"
+                            title="Editar dispositivo"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRegisteredDevice(dev.id)}
+                            className="p-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800"
+                            title="Quitar de la lista"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Nodos detectados en Firebase RTDB pendientes de activar */}
+            {unregisteredRTDBDevices.length > 0 && (
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-3">
+                <div className="pb-2 border-b border-slate-800">
+                  <h3 className="text-sm font-bold text-slate-200">
+                    Otros nodos detectados en Firebase RTDB ({unregisteredRTDBDevices.length})
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Estos nodos existen en tu base de datos <span className="font-mono">/dispositivos</span>, pero están ocultos porque dejaste solo los dispositivos activos de arriba. Puedes habilitarlos con 1 clic cuando los conectes:
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  {unregisteredRTDBDevices.map((rtDev) => (
+                    <div
+                      key={rtDev.id}
+                      className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                    >
+                      <div>
+                        <span className="font-mono font-bold text-slate-200">{rtDev.id}</span>
+                        <span className="text-slate-400 ml-2">({rtDev.sectorName})</span>
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                          CO: {rtDev.rawCO ?? rtDev.metrics.co} · PM2.5: {rtDev.rawPM25 ?? rtDev.metrics.polvoPM} · Temp: {rtDev.metrics.temperatura}°C · Hum: {rtDev.metrics.humedad}%
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleImportRTDBDevice(rtDev, 'sensor')}
+                          disabled={isSaving}
+                          className="px-2.5 py-1 rounded-lg bg-cyan-950 hover:bg-cyan-900 text-cyan-200 border border-cyan-700 font-bold text-[11px]"
+                        >
+                          + Agregar como Sensor
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleImportRTDBDevice(rtDev, 'gateway')}
+                          disabled={isSaving}
+                          className="px-2.5 py-1 rounded-lg bg-purple-950 hover:bg-purple-900 text-purple-200 border border-purple-700 font-bold text-[11px]"
+                        >
+                          + Agregar como Gateway
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

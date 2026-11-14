@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Navbar } from './components/Navbar';
 import { DashboardView } from './components/DashboardView';
 import { MonitoringView } from './components/MonitoringView';
@@ -33,7 +33,6 @@ import {
 import { 
   INITIAL_VARIABLES, 
   MINING_SITES, 
-  INITIAL_DEVICES, 
   INITIAL_ALERTS, 
   INITIAL_RENTALS, 
   INITIAL_ASSIGNMENTS, 
@@ -67,10 +66,38 @@ import {
 import { soundAlert } from './services/audioAlert';
 import { ShieldAlert, AlertTriangle, X, Megaphone, Lock } from 'lucide-react';
 
+const INITIAL_SINGLE_DEVICE: SensorDevice = {
+  id: 'device_38A839E81F84',
+  code: 'device_38A839E81F84',
+  name: 'Nodo Sensor & Gateway Principal (1F84)',
+  type: 'estacion_fija',
+  sectorId: 'sec-device_38A839E81F84',
+  sectorName: 'Mina Chuquicamata - Rampa Principal',
+  batteryPct: 95,
+  signalStrength: 'debil',
+  lastPing: 'Conectando...',
+  status: 'desconectado',
+  assignedTo: 'Manuel Crisostomo',
+  deviceCategory: 'gateway_sensor',
+  localIp: '192.168.4.1',
+  gatewayOnline: false,
+  metrics: {
+    temperatura: 22.4,
+    humedad: 48,
+    co2: 520,
+    co: 12,
+    ch4: 0.1,
+    o2: 20.9,
+    flujoAire: 1.25,
+    ruido: 74,
+    polvoPM: 25,
+  },
+};
+
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
   const [variables, setVariables] = useState<TelemetryVariable[]>(INITIAL_VARIABLES);
-  const [devices, setDevices] = useState<SensorDevice[]>(INITIAL_DEVICES);
+  const [devices, setDevices] = useState<SensorDevice[]>([INITIAL_SINGLE_DEVICE]);
   const [alerts, setAlerts] = useState<SafetyAlert[]>(INITIAL_ALERTS);
   const [rentals, setRentals] = useState<DeviceRental[]>(INITIAL_RENTALS);
   const [assignments, setAssignments] = useState<WorkerAssignment[]>(INITIAL_ASSIGNMENTS);
@@ -88,7 +115,7 @@ export default function App() {
   });
 
   const [selectedSensorId, setSelectedSensorId] = useState<string | null>(null);
-  const [activeTelemetryDeviceId, setActiveTelemetryDeviceId] = useState<string>('device_A4CB2F124B00');
+  const [activeTelemetryDeviceId, setActiveTelemetryDeviceId] = useState<string>('device_38A839E81F84');
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
   const [showEmergencyModal, setShowEmergencyModal] = useState<boolean>(false);
@@ -118,9 +145,6 @@ export default function App() {
         if (remoteDevices && remoteDevices.length > 0) {
           setDevices(remoteDevices);
           setIsFirebaseConnected(true);
-
-          // Evaluar mediciones en tiempo real contra los umbrales dinámicos configurados
-          alertEngine.processAllDevices(remoteDevices);
         }
       });
 
@@ -177,9 +201,104 @@ export default function App() {
     };
   }, []);
 
+  // Lista controlada de dispositivos visibles (por defecto solo device_38A839E81F84, editable desde Control Maestro)
+  const visibleDevices = useMemo<SensorDevice[]>(() => {
+    const rtdbMap = new Map<string, SensorDevice>(devices.map((d) => [d.id, d]));
+    const regList = platformConfig.registeredDevices || DEFAULT_PLATFORM_CONFIG.registeredDevices;
+
+    const buildFromRegistry = (reg: typeof regList[number]): SensorDevice => {
+      const existing = rtdbMap.get(reg.id);
+      if (existing) {
+        return {
+          ...existing,
+          name: reg.name || existing.name,
+          sectorName: reg.sectorName || existing.sectorName,
+          deviceCategory: reg.category,
+          parentGatewayId: reg.parentGatewayId || existing.parentGatewayId,
+          localIp: reg.localIp || existing.localIp,
+          type: reg.category === 'sensor' ? 'multigas_portatil' : 'estacion_fija',
+        };
+      }
+      return {
+        id: reg.id,
+        code: reg.id,
+        name: reg.name,
+        type: reg.category === 'sensor' ? 'multigas_portatil' : 'estacion_fija',
+        sectorId: `sec-${reg.id}`,
+        sectorName: reg.sectorName || 'Faena Minera',
+        batteryPct: 100,
+        signalStrength: 'debil',
+        lastPing: 'En espera de telemetría',
+        status: 'desconectado',
+        assignedTo: 'Pendiente de conexión',
+        rawCO: 0,
+        rawPM25: 0,
+        rawTemp: 22.0,
+        rawHum: 48,
+        lastUpdateServer: 0,
+        gatewayOnline: false,
+        alarmaActiva: false,
+        deviceCategory: reg.category,
+        parentGatewayId: reg.parentGatewayId,
+        localIp: reg.localIp,
+        metrics: {
+          temperatura: 22.0,
+          humedad: 48,
+          co2: 450,
+          co: 0,
+          ch4: 0,
+          o2: 20.9,
+          flujoAire: 1.25,
+          ruido: 65,
+          polvoPM: 0,
+        },
+      };
+    };
+
+    if (platformConfig.onlyShowRegisteredDevices) {
+      const enabledRegs = regList.filter((r) => r.enabled !== false);
+      const effectiveRegs = enabledRegs.length > 0 ? enabledRegs : regList.slice(0, 1);
+      const mapped = effectiveRegs.map(buildFromRegistry);
+      return mapped.length > 0 ? mapped : [INITIAL_SINGLE_DEVICE];
+    }
+
+    const regMap = new Map(regList.map((r) => [r.id, r]));
+    const enrichedRTDB = devices.map((d) => {
+      const reg = regMap.get(d.id);
+      if (!reg) return d;
+      return {
+        ...d,
+        name: reg.name || d.name,
+        sectorName: reg.sectorName || d.sectorName,
+        deviceCategory: reg.category,
+        parentGatewayId: reg.parentGatewayId || d.parentGatewayId,
+        localIp: reg.localIp || d.localIp,
+      };
+    });
+    const missingEnabled = regList
+      .filter((r) => r.enabled !== false && !rtdbMap.has(r.id))
+      .map(buildFromRegistry);
+    const combined = [...enrichedRTDB, ...missingEnabled];
+    return combined.length > 0 ? combined : [INITIAL_SINGLE_DEVICE];
+  }, [devices, platformConfig]);
+
+  // Mantener siempre un dispositivo activo válido dentro de los dispositivos visibles
+  useEffect(() => {
+    if (visibleDevices.length > 0 && !visibleDevices.some((d) => d.id === activeTelemetryDeviceId)) {
+      setActiveTelemetryDeviceId(visibleDevices[0].id);
+    }
+  }, [visibleDevices, activeTelemetryDeviceId]);
+
+  // Evaluar mediciones en tiempo real únicamente sobre los dispositivos visibles
+  useEffect(() => {
+    if (visibleDevices.length > 0) {
+      alertEngine.processAllDevices(visibleDevices);
+    }
+  }, [visibleDevices]);
+
   // Synchronize dashboard variables directly with the real active device from RTDB + SuperAdmin metrics config
   useEffect(() => {
-    const targetDev = devices.find(d => d.id === activeTelemetryDeviceId) || devices[0];
+    const targetDev = visibleDevices.find(d => d.id === activeTelemetryDeviceId) || visibleDevices[0];
     const m = platformConfig.metrics;
     if (targetDev && targetDev.metrics) {
       const tempVal = targetDev.metrics.temperatura;
@@ -312,7 +431,7 @@ export default function App() {
         },
       ]);
     }
-  }, [devices, activeTelemetryDeviceId, platformConfig]);
+  }, [visibleDevices, activeTelemetryDeviceId, platformConfig]);
 
   // Second counter for last updated
   useEffect(() => {
@@ -398,7 +517,7 @@ export default function App() {
 
   const handleSimulateGasSpike = useCallback(async (sensorId: string) => {
     soundAlert.playCriticalAlert();
-    const targetDev = devices.find(d => d.id === sensorId) || devices[0];
+    const targetDev = visibleDevices.find(d => d.id === sensorId) || visibleDevices[0];
     if (!targetDev) return;
 
     const updatedDevice: SensorDevice = {
@@ -412,7 +531,11 @@ export default function App() {
       },
     };
 
-    setDevices((prev) => prev.map(d => d.id === sensorId ? updatedDevice : d));
+    setDevices((prev) =>
+      prev.some(d => d.id === sensorId)
+        ? prev.map(d => d.id === sensorId ? updatedDevice : d)
+        : [...prev, updatedDevice]
+    );
 
     // Create a new safety alert
     const newAlert: SafetyAlert = {
@@ -434,13 +557,13 @@ export default function App() {
 
     setAlerts((prev) => [newAlert, ...prev]);
 
-    // Broadcast alert to Firebase RTDB so Android App and hardware ESP32 immediately react
+    // Broadcast alert to Firebase RTDB so hardware ESP32 immediately reacts
     await broadcastAlertToRTDB(newAlert);
-  }, [devices]);
+  }, [visibleDevices]);
 
   const handleResetSensor = useCallback(async (sensorId: string) => {
     soundAlert.playFeedbackBeep();
-    const targetDev = devices.find(d => d.id === sensorId);
+    const targetDev = visibleDevices.find(d => d.id === sensorId);
     if (!targetDev) return;
 
     const resetDevice: SensorDevice = {
@@ -454,9 +577,13 @@ export default function App() {
       },
     };
 
-    setDevices((prev) => prev.map(d => d.id === sensorId ? resetDevice : d));
+    setDevices((prev) =>
+      prev.some(d => d.id === sensorId)
+        ? prev.map(d => d.id === sensorId ? resetDevice : d)
+        : [...prev, resetDevice]
+    );
     await resetGatewayDataInRTDB(sensorId);
-  }, [devices]);
+  }, [visibleDevices]);
 
   const handleResetPageLevels = useCallback(async () => {
     soundAlert.playFeedbackBeep();
@@ -486,7 +613,7 @@ export default function App() {
     setIsLightActive(true);
     setDismissEmergencyBanner(false);
 
-    const dev = devices.find(d => d.id === activeTelemetryDeviceId) || devices[0];
+    const dev = visibleDevices.find(d => d.id === activeTelemetryDeviceId) || visibleDevices[0];
     if (dev) {
       if (type === 'gas_critico') {
         setDevices(prev => prev.map(d => d.id === dev.id ? {
@@ -530,10 +657,9 @@ export default function App() {
 
     setAlerts(prev => [newAlert, ...prev]);
 
-    // Broadcast drill to Firebase Realtime Database across all nodes:
-    // updates device_38A839E81F84 (monitored by Android APK), gateway, and root /simulacro
+    // Broadcast drill to Firebase Realtime Database on active device and root /simulacro
     await broadcastDrillToRTDB(true, type, dev?.id || 'device_38A839E81F84');
-  }, [devices, activeTelemetryDeviceId]);
+  }, [visibleDevices, activeTelemetryDeviceId]);
 
   const handleStopDrill = useCallback(async () => {
     soundAlert.stopContinuousAlarm();
@@ -544,7 +670,7 @@ export default function App() {
     setIsLightActive(false);
     setDismissEmergencyBanner(true);
 
-    const dev = devices.find(d => d.id === activeTelemetryDeviceId) || devices[0];
+    const dev = visibleDevices.find(d => d.id === activeTelemetryDeviceId) || visibleDevices[0];
     if (dev) {
       setDevices(prev => prev.map(d => d.id === dev.id ? {
         ...d,
@@ -557,9 +683,9 @@ export default function App() {
 
     setAlerts(prev => prev.map(a => a.id.startsWith('alt-drill-') ? { ...a, resolved: true, acknowledged: true } : a));
 
-    // Clear drill and reset all devices in Firebase Realtime Database
+    // Clear drill and reset active device in Firebase Realtime Database
     await broadcastDrillToRTDB(false, null, dev?.id || 'device_38A839E81F84');
-  }, [devices, activeTelemetryDeviceId]);
+  }, [visibleDevices, activeTelemetryDeviceId]);
 
   const handleToggleAlarm = useCallback(async () => {
     const next = !isAlarmActive;
@@ -747,7 +873,7 @@ export default function App() {
   // Check if gas or dust in the active device is in critical threshold (Prompt Req 4)
   // An emergency in terrain MUST ONLY trigger if the device is ONLINE (transmitting live within 15 seconds).
   // If the device is disconnected/unplugged, floating ADC readings of 4095 (pins in the air) do NOT trigger alarms.
-  const activeDevice = devices.find(d => d.id === activeTelemetryDeviceId) || devices[0];
+  const activeDevice = visibleDevices.find(d => d.id === activeTelemetryDeviceId) || visibleDevices[0];
   const isDeviceOnline = Boolean(activeDevice?.gatewayOnline);
   const rawGas = activeDevice?.rawCO !== undefined ? activeDevice.rawCO : activeDevice?.metrics?.co || 0;
   const rawDust = activeDevice?.rawPM25 !== undefined ? activeDevice.rawPM25 : activeDevice?.metrics?.polvoPM || 0;
@@ -965,7 +1091,7 @@ export default function App() {
                 variables={variables}
                 activeAlerts={activeAlerts}
                 currentSite={currentSite}
-                devices={devices}
+                devices={visibleDevices}
                 activeTelemetryDeviceId={activeTelemetryDeviceId}
                 onSelectTelemetryDevice={setActiveTelemetryDeviceId}
                 onNavigateTab={handleSelectTab}
@@ -988,7 +1114,7 @@ export default function App() {
 
             {currentTab === 'monitoreo' && (
               <MonitoringView
-                devices={devices}
+                devices={visibleDevices}
                 currentSite={currentSite}
                 selectedSensorId={selectedSensorId}
                 onSelectSensor={setSelectedSensorId}
@@ -1000,7 +1126,7 @@ export default function App() {
             {currentTab === 'alertas' && (
               <AlertsView
                 alerts={alerts}
-                devices={devices}
+                devices={visibleDevices}
                 currentUser={currentUser}
                 onAcknowledgeAlert={handleAcknowledgeAlert}
                 onResolveAlert={handleResolveAlert}
@@ -1016,7 +1142,7 @@ export default function App() {
 
             {currentTab === 'configuracion_alertas' && (
               <AlertConfigurationView
-                devices={devices}
+                devices={visibleDevices}
                 currentUser={currentUser}
               />
             )}
@@ -1025,7 +1151,7 @@ export default function App() {
               <DevicesAndRentalsView
                 rentals={rentals}
                 assignments={assignments}
-                devices={devices}
+                devices={visibleDevices}
                 onAddAssignment={handleAddAssignment}
                 onAddRentalContract={handleAddRentalContract}
                 onRecordPayment={handleRecordPayment}
@@ -1067,6 +1193,7 @@ export default function App() {
                 currentUser={currentUser}
                 usersList={usersList}
                 platformConfig={platformConfig}
+                rtdbDevices={devices}
               />
             )}
           </>

@@ -30,7 +30,8 @@ import {
   ControllableTab,
   NavigationTab,
   PlatformConfig,
-  WindowOverrideValue
+  WindowOverrideValue,
+  RegisteredDeviceConfig
 } from '../types';
 
 export const USER_RTDB_URL = "https://minefase-fc5f5-default-rtdb.firebaseio.com/";
@@ -75,22 +76,32 @@ export function recordDevicePacketArrival(key: string) {
   lastPacketArrivalMap[key] = Date.now();
 }
 
+function readNumField(val: any, fallback: number): number {
+  if (typeof val === 'number' && !Number.isNaN(val)) return val;
+  if (typeof val === 'string' && val.trim() !== '' && !Number.isNaN(Number(val))) return Number(val);
+  return fallback;
+}
+
 export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevice {
-  const coVal = typeof data?.CO === 'number' ? data.CO : (typeof data?.co === 'number' ? data.co : 12);
-  const pmVal = typeof data?.PM2_5 === 'number' ? data.PM2_5 : (typeof data?.pm25 === 'number' ? data.pm25 : 25);
-  const tempVal = typeof data?.temperatura === 'number' ? data.temperatura : (typeof data?.temp === 'number' ? data.temp : 22.4);
-  const humVal = typeof data?.humedad === 'number' ? data.humedad : (typeof data?.hum === 'number' ? data.hum : 48);
-  
+  const coVal = data?.CO !== undefined ? readNumField(data.CO, 12) : readNumField(data?.co, 12);
+  const pmVal = data?.PM2_5 !== undefined ? readNumField(data.PM2_5, 25) : readNumField(data?.pm25, 25);
+  const tempVal = data?.temperatura !== undefined ? readNumField(data.temperatura, 22.4) : readNumField(data?.temp, 22.4);
+  const humVal = data?.humedad !== undefined ? readNumField(data.humedad, 48) : readNumField(data?.hum, 48);
+
+  const now = Date.now();
+  const lastArrival = lastPacketArrivalMap[key] || 0;
   let serverTime = Number(data?.last_update_server) || Number(data?.timestamp_server) || 0;
-  // Soportar timestamps en segundos (10 dígitos desde NTP de ESP32) convirtiéndolos a milisegundos (13 dígitos)
-  if (serverTime > 0 && serverTime < 100000000000) {
+  // 10 dígitos Unix epoch (>= año 2001) -> convertir a milisegundos
+  if (serverTime >= 1000000000 && serverTime < 100000000000) {
     serverTime = serverTime * 1000;
+  } else if (serverTime > 0 && serverTime < 1000000000) {
+    // El firmware envió millis() de uptime (ej: 141983 ms) en vez de época Unix:
+    // usar la hora real de llegada del paquete RTDB para evitar fechas de 1970.
+    serverTime = lastArrival > 0 ? lastArrival : now;
   }
 
   // Connection check: under 20 seconds difference or recent WebSocket RTDB packet
-  const now = Date.now();
   const diffSeconds = serverTime > 0 ? Math.floor(Math.abs(now - serverTime) / 1000) : 999999;
-  const lastArrival = lastPacketArrivalMap[key] || 0;
   const arrivalDiff = lastArrival > 0 ? Math.floor((now - lastArrival) / 1000) : 999999;
 
   const isOnline = diffSeconds <= 20 || arrivalDiff <= 20;
@@ -112,20 +123,20 @@ export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevic
 
   // Friendly sector and name mapping
   let deviceName = data?.name || key;
-  let sectorName = 'Faena Central';
+  let sectorName = data?.sectorName || 'Faena Central';
   let assigned = data?.userEmail ? 'Manuel Crisostomo' : 'Cuadrilla Operativa';
 
   if (key === 'device_38A839E81F84') {
-    deviceName = 'Sensor Fase 1 (Chuquicamata - ESP32 Nodo A)';
-    sectorName = 'Mina Chuquicamata - Rampa Principal';
+    deviceName = data?.name || 'Nodo Sensor & Gateway Principal (1F84)';
+    sectorName = data?.sectorName || 'Mina Chuquicamata - Rampa Principal';
     assigned = 'Manuel Crisostomo';
   } else if (key === 'device_A4CB2F124B00') {
-    deviceName = 'Detector San José (Gateway ESP32 Nodo B)';
-    sectorName = 'Mina San José - Nivel -400m';
+    deviceName = data?.name || 'Detector San José (Gateway ESP32 Nodo B)';
+    sectorName = data?.sectorName || 'Mina San José - Nivel -400m';
     assigned = 'Gerardo Cuellar';
   } else if (key === 'NODO_U-01') {
-    deviceName = 'Nodo Fijo Monitoreo U-01';
-    sectorName = 'Socavón Norte Frente de Avance';
+    deviceName = data?.name || 'Nodo Fijo Monitoreo U-01';
+    sectorName = data?.sectorName || 'Socavón Norte Frente de Avance';
     assigned = 'Estación Automatizada';
   }
 
@@ -154,6 +165,10 @@ export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevic
     descripcionMonitoreo: descripcionMonitoreo,
     fecha: data?.fecha || '',
     hora: data?.hora || '',
+    via: data?.via || '',
+    localIp: data?.localIp || undefined,
+    deviceCategory: data?.deviceCategory || undefined,
+    parentGatewayId: data?.parentGatewayId || undefined,
     registroAlarmas: data?.registro_alarmas,
     metrics: {
       temperatura: Number(tempVal.toFixed(1)),
@@ -247,79 +262,23 @@ export function mapRTDBContractToRental(key: string, data: any): DeviceRental {
 // -------------------------------------------------------------
 export function subscribeToRTDBDevices(callback: (devices: SensorDevice[]) => void): () => void {
   const devicesRef = ref(rtdb, 'dispositivos');
-  const precargaRef = ref(rtdb, 'precarga/usuarios_contratos');
-
-  let liveTelemetryMap: Record<string, any> = {};
-  let precargaMap: Record<string, any> = {};
-
-  const emitCombined = () => {
-    const combined: SensorDevice[] = [];
-    const seenCodes = new Set<string>();
-
-    // 1. First add live telemetry devices (highest priority)
-    Object.keys(liveTelemetryMap).forEach((key) => {
-      const dev = mapRTDBDeviceToSensorDevice(key, liveTelemetryMap[key]);
-      combined.push(dev);
-      seenCodes.add(key);
-    });
-
-    // 2. Add devices registered in precarga (fleet inventory)
-    Object.keys(precargaMap).forEach((userKey) => {
-      const u = precargaMap[userKey];
-      const disp = u?.dispositivo;
-      if (disp && disp.idDispositivo && disp.idDispositivo !== 'N/A' && !seenCodes.has(disp.idDispositivo)) {
-        seenCodes.add(disp.idDispositivo);
-        combined.push({
-          id: disp.idDispositivo,
-          code: disp.idDispositivo,
-          name: disp.nombreDispositivo || disp.idDispositivo,
-          type: 'multigas_portatil',
-          sectorId: `sec-${disp.idDispositivo}`,
-          sectorName: 'Faena Mina Central',
-          batteryPct: 85,
-          signalStrength: 'optima',
-          lastPing: disp.ultimaConexion || 'En flota',
-          status: 'normal',
-          assignedTo: u.nombre || 'Operador',
-          metrics: {
-            temperatura: 22.0,
-            humedad: 45,
-            co2: 450,
-            co: 10.5,
-            ch4: 0.1,
-            o2: 20.9,
-            flujoAire: 1.3,
-            ruido: 70,
-            polvoPM: 30,
-          },
-        });
-      }
-    });
-
-    callback(combined);
-  };
 
   const unsub1 = onValue(devicesRef, (snapshot) => {
     if (snapshot.exists()) {
       const incoming = snapshot.val() || {};
-      Object.keys(incoming).forEach((k) => {
-        recordDevicePacketArrival(k);
+      const combined: SensorDevice[] = [];
+      Object.keys(incoming).forEach((key) => {
+        recordDevicePacketArrival(key);
+        combined.push(mapRTDBDeviceToSensorDevice(key, incoming[key]));
       });
-      liveTelemetryMap = incoming;
-      emitCombined();
-    }
-  });
-
-  const unsub2 = onValue(precargaRef, (snapshot) => {
-    if (snapshot.exists()) {
-      precargaMap = snapshot.val() || {};
-      emitCombined();
+      callback(combined);
+    } else {
+      callback([]);
     }
   });
 
   return () => {
     unsub1();
-    unsub2();
   };
 }
 
@@ -711,12 +670,9 @@ export async function resetGatewayDataInRTDB(deviceId?: string): Promise<void> {
       simulacro_activo: false,
     };
 
-    // Update target device, Android primary device, and gateway in RTDB
-    const devIds = Array.from(new Set([deviceId, 'device_38A839E81F84', 'device_A4CB2F124B00', 'gateway'].filter(Boolean)));
-    for (const id of devIds) {
-      const devRef = ref(rtdb, `dispositivos/${id}`);
-      await update(devRef, resetPayload).catch(() => {});
-    }
+    const targetId = deviceId || 'device_38A839E81F84';
+    const devRef = ref(rtdb, `dispositivos/${targetId}`);
+    await update(devRef, resetPayload).catch(() => {});
 
     // Reset root alert/drill indicators
     const rootRef = ref(rtdb);
@@ -741,13 +697,11 @@ export async function toggleGatewayAlarmInRTDB(deviceId: string, active: boolean
       last_update_server: now,
     };
 
-    const devIds = Array.from(new Set([deviceId, 'device_38A839E81F84', 'device_A4CB2F124B00', 'gateway'].filter(Boolean)));
-    for (const id of devIds) {
-      const devRef = ref(rtdb, `dispositivos/${id}`);
-      await update(devRef, payload).catch(() => {});
-    }
+    const targetId = deviceId || 'device_38A839E81F84';
+    const devRef = ref(rtdb, `dispositivos/${targetId}`);
+    await update(devRef, payload).catch(() => {});
 
-    // Update root level alarm for quick Android listeners
+    // Update root level alarm for quick listeners
     const rootRef = ref(rtdb);
     await update(rootRef, {
       alarma: active,
@@ -767,11 +721,9 @@ export async function toggleGatewayLightInRTDB(deviceId: string, active: boolean
       last_update_server: now,
     };
 
-    const devIds = Array.from(new Set([deviceId, 'device_38A839E81F84', 'device_A4CB2F124B00', 'gateway'].filter(Boolean)));
-    for (const id of devIds) {
-      const devRef = ref(rtdb, `dispositivos/${id}`);
-      await update(devRef, payload).catch(() => {});
-    }
+    const targetId = deviceId || 'device_38A839E81F84';
+    const devRef = ref(rtdb, `dispositivos/${targetId}`);
+    await update(devRef, payload).catch(() => {});
 
     const rootRef = ref(rtdb);
     await update(rootRef, { luz: active }).catch(() => {});
@@ -781,7 +733,7 @@ export async function toggleGatewayLightInRTDB(deviceId: string, active: boolean
 }
 
 // -------------------------------------------------------------
-// BROADCAST DRILL AND ALERTS FOR ANDROID APP & HARDWARE SYNC
+// BROADCAST DRILL AND ALERTS FOR HARDWARE SYNC
 // -------------------------------------------------------------
 export async function broadcastDrillToRTDB(
   active: boolean, 
@@ -790,7 +742,7 @@ export async function broadcastDrillToRTDB(
 ): Promise<void> {
   try {
     const now = Date.now();
-    const devIds = Array.from(new Set([primaryDeviceId, 'device_38A839E81F84', 'device_A4CB2F124B00', 'gateway']));
+    const devIds = [primaryDeviceId || 'device_38A839E81F84'];
 
     if (active) {
       const isGas = drillType === 'gas_critico';
@@ -1340,6 +1292,18 @@ export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
     allowHardwareControlsForNonSuperAdmin: true,
     allowEmergencyButtonForOperador: true,
   },
+  registeredDevices: [
+    {
+      id: 'device_38A839E81F84',
+      name: 'Nodo Sensor & Gateway Principal (1F84)',
+      category: 'gateway_sensor',
+      sectorName: 'Mina Chuquicamata - Rampa Principal',
+      localIp: '192.168.4.1',
+      enabled: true,
+      createdAt: 1763000000000,
+    },
+  ],
+  onlyShowRegisteredDevices: true,
   actualizado_en: Date.now(),
   actualizado_por: 'SuperAdmin (Por defecto)',
 };
@@ -1396,9 +1360,58 @@ function mergePlatformConfig(raw: any): PlatformConfig {
       ...DEFAULT_PLATFORM_CONFIG.appearance,
       ...(raw?.appearance || {}),
     },
+    registeredDevices: Array.isArray(raw?.registeredDevices)
+      ? raw.registeredDevices
+      : DEFAULT_PLATFORM_CONFIG.registeredDevices,
+    onlyShowRegisteredDevices:
+      typeof raw?.onlyShowRegisteredDevices === 'boolean'
+        ? raw.onlyShowRegisteredDevices
+        : true,
     actualizado_en: raw?.actualizado_en || Date.now(),
     actualizado_por: raw?.actualizado_por || 'SuperAdmin',
   };
+}
+
+export async function initializeRegisteredDeviceInRTDB(
+  device: RegisteredDeviceConfig,
+  actingUser: UserProfile
+): Promise<void> {
+  if (actingUser.role !== 'superadmin') {
+    throw new Error('Acceso denegado: Solo el SuperAdministrador puede inicializar dispositivos en Firebase.');
+  }
+  const cleanId = device.id.trim().replace(/[.#$/[\]]/g, '_');
+  const devRef = ref(rtdb, `dispositivos/${cleanId}`);
+  const snap = await get(devRef).catch(() => null);
+  const now = Date.now();
+  const baseMetadata = {
+    name: device.name,
+    sectorName: device.sectorName,
+    deviceCategory: device.category,
+    parentGatewayId: device.parentGatewayId || '',
+    localIp: device.localIp || '192.168.4.1',
+  };
+
+  if (snap && snap.exists()) {
+    await update(devRef, baseMetadata);
+  } else {
+    await set(devRef, {
+      ...baseMetadata,
+      CO: 45,
+      PM2_5: 25,
+      temperatura: 22.0,
+      humedad: 48,
+      alarma_activa: false,
+      alarma: false,
+      buzzer: false,
+      luz: false,
+      iluminacion_led: false,
+      estado_adquisicion: 'activo',
+      origen_alarma: 'NINGUNO',
+      descripcion_monitoreo: `Nodo ${device.name} inicializado por SuperAdmin, en espera de telemetría ESP32.`,
+      via: device.category === 'sensor' && device.parentGatewayId ? 'ESP_NOW_GATEWAY' : 'WIFI_DIRECTO',
+      last_update_server: now,
+    });
+  }
 }
 
 export function subscribeToPlatformConfig(

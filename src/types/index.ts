@@ -49,6 +49,10 @@ export interface SensorDevice {
   descripcionMonitoreo?: string;
   fecha?: string;
   hora?: string;
+  via?: string;
+  localIp?: string;
+  deviceCategory?: DeviceCategory;
+  parentGatewayId?: string;
   registroAlarmas?: Record<string, any>;
 }
 
@@ -268,10 +272,25 @@ export interface PlatformAppearanceConfig {
   allowEmergencyButtonForOperador: boolean;
 }
 
+export type DeviceCategory = 'sensor' | 'gateway' | 'gateway_sensor';
+
+export interface RegisteredDeviceConfig {
+  id: string;
+  name: string;
+  category: DeviceCategory;
+  sectorName: string;
+  parentGatewayId?: string;
+  localIp?: string;
+  enabled: boolean;
+  createdAt: number;
+}
+
 export interface PlatformConfig {
   visibility: PlatformVisibilityConfig;
   metrics: PlatformMetricsConfig;
   appearance: PlatformAppearanceConfig;
+  registeredDevices: RegisteredDeviceConfig[];
+  onlyShowRegisteredDevices: boolean;
   actualizado_en: number;
   actualizado_por: string;
 }
