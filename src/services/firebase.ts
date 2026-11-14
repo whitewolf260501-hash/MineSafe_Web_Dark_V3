@@ -711,6 +711,8 @@ export async function toggleGatewayAlarmInRTDB(
       alarma: active,
       alarma_activa: active,
       buzzer: active,
+      comando_web: active ? 'ENCENDER' : 'APAGAR',
+      silencio_remoto: !active,
       last_update_server: now,
     };
     if (active) {
@@ -752,6 +754,8 @@ export async function shutdownAlarmCompletelyInRTDB(
       luz: false,
       iluminacion_led: false,
       simulacro_activo: false,
+      comando_web: 'APAGAR',
+      silencio_remoto: true,
       origen_alarma: 'NINGUNO',
       descripcion_monitoreo: `Alarma apagada completamente por SuperAdmin (${actingUser.name}).`,
       last_update_server: now,
