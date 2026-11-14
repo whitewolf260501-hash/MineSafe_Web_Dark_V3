@@ -17,15 +17,11 @@ import {
   Activity,
   ShieldCheck,
   ShieldAlert,
-  Fingerprint,
-  Smartphone,
-  Download,
-  QrCode
+  Fingerprint
 } from 'lucide-react';
 import { UserProfile, UserRole } from '../types';
 import { PRELOADED_USERS } from '../data/mockData';
 import { soundAlert } from '../services/audioAlert';
-import { MobileAppDownloadModal } from './MobileAppDownloadModal';
 
 interface LoginModalProps {
   currentUser: UserProfile | null;
@@ -58,7 +54,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [selectedProfileForAuth, setSelectedProfileForAuth] = useState<UserProfile | null>(null);
   const [hideQuickProfiles, setHideQuickProfiles] = useState(false);
   const passwordInputRef = useRef<HTMLInputElement>(null);
-  const [showMobileModal, setShowMobileModal] = useState(false);
 
   // Register Form State
   const [regName, setRegName] = useState('');
@@ -554,38 +549,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </button>
           </form>
 
-          {/* Mobile Application Download Banner (Prompt Req) */}
-          <div className="pt-3 border-t border-slate-800/80">
-            <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-cyan-950/40 border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-3 shadow-inner">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-emerald-950/90 border border-emerald-700/60 flex items-center justify-center text-emerald-400 shrink-0 shadow-sm shadow-emerald-950">
-                  <Smartphone className="w-4 h-4 text-emerald-400" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-white">App Móvil MineSafe</span>
-                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">
-                      APK v2.4.0
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-400">
-                    Descargable para Android & PWA Offline
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowMobileModal(true)}
-                className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shrink-0 shadow-md shadow-emerald-950 transition-colors cursor-pointer"
-                title="Descargar instalador APK o escanear QR"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Descargar</span>
-              </button>
-            </div>
-          </div>
-
         </div>
       )}
 
@@ -740,19 +703,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         {/* The Login Card */}
         {cardContent}
 
-        {/* Secondary Mobile App Download Button under card */}
-        <div className="mt-4 flex items-center justify-center relative z-10">
-          <button
-            type="button"
-            onClick={() => setShowMobileModal(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-800 hover:border-emerald-500/50 transition-all text-xs font-semibold shadow-md shadow-black/40 cursor-pointer"
-          >
-            <Smartphone className="w-4 h-4 text-emerald-400" />
-            <span>Descargar Aplicación Móvil (Android APK / PWA)</span>
-            <Download className="w-3.5 h-3.5 text-cyan-400 ml-1" />
-          </button>
-        </div>
-
         {/* Portal Footer Notice */}
         <div className="mt-5 text-center text-[11px] text-slate-400 relative z-10 max-w-md shrink-0">
           <p className="flex items-center justify-center gap-1.5 font-medium">
@@ -764,12 +714,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </p>
         </div>
 
-        {/* Mobile Download Modal */}
-        <MobileAppDownloadModal
-          isOpen={showMobileModal}
-          onClose={() => setShowMobileModal(false)}
-        />
-
       </div>
     );
   }
@@ -780,12 +724,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       <div className="min-h-full flex items-center justify-center py-4">
         {cardContent}
       </div>
-
-      {/* Mobile Download Modal */}
-      <MobileAppDownloadModal
-        isOpen={showMobileModal}
-        onClose={() => setShowMobileModal(false)}
-      />
     </div>
   );
 };

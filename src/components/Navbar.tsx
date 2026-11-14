@@ -24,12 +24,10 @@ import {
   BellRing,
   BellOff,
   RotateCcw,
-  Smartphone,
   Sliders
 } from 'lucide-react';
 import { NavigationTab, UserProfile } from '../types';
 import { soundAlert } from '../services/audioAlert';
-import { MobileAppDownloadModal } from './MobileAppDownloadModal';
 
 interface NavbarProps {
   currentTab: NavigationTab;
@@ -71,7 +69,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   isDrillActive = false,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [showMobileModal, setShowMobileModal] = useState(false);
   const [isMuted, setIsMuted] = useState(soundAlert.getMutedState());
 
   const handleToggleSound = () => {
@@ -362,21 +359,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             })}
           </nav>
 
-          {/* Subterranean shift info status indicator & Mobile App Button */}
+          {/* Subterranean shift info status indicator */}
           <div className="hidden lg:flex items-center gap-3 shrink-0 pl-2">
             <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
               <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
               <span>Faena El Teniente · Nivel -510m</span>
             </div>
-
-            <button
-              onClick={() => setShowMobileModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-lg bg-cyan-950/70 border border-cyan-800/80 text-cyan-300 hover:bg-cyan-900/80 hover:text-cyan-200 transition-colors shadow-sm"
-              title="Descargar Aplicación Móvil Android (APK) y PWA"
-            >
-              <Smartphone className="w-3.5 h-3.5 text-cyan-400" />
-              <span>App Móvil (APK)</span>
-            </button>
           </div>
         </div>
 
@@ -415,17 +403,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="pt-3 border-t border-slate-800 flex flex-col gap-2">
-            <button
-              onClick={() => {
-                setShowMobileModal(true);
-                setMobileMenuOpen(false);
-              }}
-              className="w-full flex items-center justify-center gap-2 py-2 px-3 text-xs font-bold rounded-lg border border-cyan-800 bg-cyan-950/70 text-cyan-300 hover:bg-cyan-900"
-            >
-              <Smartphone className="w-4 h-4 text-cyan-400" />
-              <span>Descargar App Móvil APK / PWA</span>
-            </button>
-
             <div className="flex items-center justify-between">
               <button
                 onClick={() => {
@@ -466,11 +443,6 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       )}
 
-      {/* Modal de descarga de la aplicación móvil */}
-      <MobileAppDownloadModal
-        isOpen={showMobileModal}
-        onClose={() => setShowMobileModal(false)}
-      />
     </header>
   );
 };
