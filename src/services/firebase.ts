@@ -26,7 +26,11 @@ import {
   DeviceThresholdsConfig,
   ThresholdVariableConfig,
   AlertEventRecord,
-  AlarmAuditRecord
+  AlarmAuditRecord,
+  ControllableTab,
+  NavigationTab,
+  PlatformConfig,
+  WindowOverrideValue
 } from '../types';
 
 export const USER_RTDB_URL = "https://minefase-fc5f5-default-rtdb.firebaseio.com/";
@@ -1255,6 +1259,256 @@ export function subscribeToAlertEvents(
     callback([]);
   });
 }
+
+/**
+ * ============================================================================
+ * CONFIGURACIÓN MAESTRA DE PLATAFORMA Y VISIBILIDAD DE VENTANAS (SOLO SUPERADMIN)
+ * ============================================================================
+ */
+
+export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
+  visibility: {
+    rolePermissions: {
+      admin: {
+        dashboard: true,
+        monitoreo: true,
+        alertas: true,
+        configuracion_alertas: true,
+        equipos: true,
+        reportes: true,
+        faenas: true,
+        usuarios: true,
+      },
+      operador: {
+        dashboard: true,
+        monitoreo: true,
+        alertas: true,
+        configuracion_alertas: false,
+        equipos: false,
+        reportes: true,
+        faenas: true,
+        usuarios: false,
+      },
+    },
+    userOverrides: {},
+  },
+  metrics: {
+    coPreventivo: 300,
+    coAdvertencia: 800,
+    coCritico: 1200,
+    coChartSafeMax: 50,
+    pm25Preventivo: 350,
+    pm25Advertencia: 750,
+    pm25Critico: 1200,
+    pm25ChartSafeMax: 50,
+    tempMin: 10,
+    tempPreventivo: 26,
+    tempAdvertencia: 32,
+    tempCritico: 38,
+    humMin: 30,
+    humPreventivo: 70,
+    humAdvertencia: 80,
+    humCritico: 90,
+    airFlowMin: 0.5,
+    airFlowMax: 3.0,
+    batteryMin: 20,
+    co2SafeMax: 1000,
+    co2CriticalMax: 2000,
+    ch4SafeMax: 1.5,
+    ch4CriticalMax: 5.0,
+    o2MinSafe: 19.5,
+    noiseSafeMax: 82,
+    noiseCriticalMax: 90,
+    gatewayTimeoutSeconds: 20,
+    emergencyGasThreshold: 1000,
+    emergencyDustThreshold: 500,
+  },
+  appearance: {
+    platformTitle: 'MineSafe: Monitoreo IoT y Seguridad Minera',
+    platformSubtitle: 'Supervisión ambiental subterránea continua, control de gases críticos, ventilación de galerías y respuesta temprana ante incidentes.',
+    siteBadgeText: 'Faena El Teniente · Nivel -510m',
+    footerText: 'Cumplimiento Normativo DS 132 / Sernageomin · Plataforma Industrial',
+    announcementEnabled: false,
+    announcementText: '',
+    announcementTone: 'info',
+    showChartsAndUsers: true,
+    showESP32Section: true,
+    showDualSensorCards: true,
+    showHeroMetricCards: true,
+    showCapabilitiesGrid: true,
+    showAdditionalGasesRow: true,
+    allowHardwareControlsForNonSuperAdmin: true,
+    allowEmergencyButtonForOperador: true,
+  },
+  actualizado_en: Date.now(),
+  actualizado_por: 'SuperAdmin (Por defecto)',
+};
+
+export function isTabVisibleForUser(
+  tab: NavigationTab,
+  user: UserProfile | null,
+  config?: PlatformConfig | null
+): boolean {
+  if (!user) return false;
+  if (tab === 'superadmin_panel') {
+    return user.role === 'superadmin';
+  }
+  if (user.role === 'superadmin') {
+    return true;
+  }
+
+  const controllableTab = tab as ControllableTab;
+  const userOverride: WindowOverrideValue | undefined =
+    config?.visibility?.userOverrides?.[user.id]?.[controllableTab];
+
+  if (userOverride === 'allow') return true;
+  if (userOverride === 'block') return false;
+
+  const roleKey = user.role === 'admin' ? 'admin' : 'operador';
+  const configuredRoleVal = config?.visibility?.rolePermissions?.[roleKey]?.[controllableTab];
+  if (typeof configuredRoleVal === 'boolean') {
+    return configuredRoleVal;
+  }
+
+  return DEFAULT_PLATFORM_CONFIG.visibility.rolePermissions[roleKey][controllableTab];
+}
+
+function mergePlatformConfig(raw: any): PlatformConfig {
+  return {
+    visibility: {
+      rolePermissions: {
+        admin: {
+          ...DEFAULT_PLATFORM_CONFIG.visibility.rolePermissions.admin,
+          ...(raw?.visibility?.rolePermissions?.admin || {}),
+        },
+        operador: {
+          ...DEFAULT_PLATFORM_CONFIG.visibility.rolePermissions.operador,
+          ...(raw?.visibility?.rolePermissions?.operador || {}),
+        },
+      },
+      userOverrides: raw?.visibility?.userOverrides || {},
+    },
+    metrics: {
+      ...DEFAULT_PLATFORM_CONFIG.metrics,
+      ...(raw?.metrics || {}),
+    },
+    appearance: {
+      ...DEFAULT_PLATFORM_CONFIG.appearance,
+      ...(raw?.appearance || {}),
+    },
+    actualizado_en: raw?.actualizado_en || Date.now(),
+    actualizado_por: raw?.actualizado_por || 'SuperAdmin',
+  };
+}
+
+export function subscribeToPlatformConfig(
+  callback: (config: PlatformConfig) => void
+): () => void {
+  const cfgRef = ref(rtdb, 'configuracion_plataforma');
+  return onValue(
+    cfgRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        callback(mergePlatformConfig(snapshot.val()));
+      } else {
+        callback(DEFAULT_PLATFORM_CONFIG);
+      }
+    },
+    (err) => {
+      console.warn('Error subscribing to platform config:', err);
+      callback(DEFAULT_PLATFORM_CONFIG);
+    }
+  );
+}
+
+export async function savePlatformConfig(
+  config: PlatformConfig,
+  actingUser: UserProfile
+): Promise<void> {
+  if (actingUser.role !== 'superadmin') {
+    throw new Error('Acceso denegado: Solo el SuperAdministrador puede modificar la configuración maestra de la plataforma.');
+  }
+
+  const m = config.metrics;
+  if (m.coPreventivo >= m.coAdvertencia || m.coAdvertencia >= m.coCritico) {
+    throw new Error('En Gas CO (MQ-2): Preventivo debe ser menor que Advertencia y éste menor que Crítico.');
+  }
+  if (m.pm25Preventivo >= m.pm25Advertencia || m.pm25Advertencia >= m.pm25Critico) {
+    throw new Error('En Polvo PM2.5: Preventivo debe ser menor que Advertencia y éste menor que Crítico.');
+  }
+  if (m.tempPreventivo >= m.tempAdvertencia || m.tempAdvertencia >= m.tempCritico) {
+    throw new Error('En Temperatura: Preventivo debe ser menor que Advertencia y éste menor que Crítico.');
+  }
+  if (m.humPreventivo >= m.humAdvertencia || m.humAdvertencia >= m.humCritico) {
+    throw new Error('En Humedad: Preventivo debe ser menor que Advertencia y éste menor que Crítico.');
+  }
+
+  const payload: PlatformConfig = {
+    ...config,
+    actualizado_en: Date.now(),
+    actualizado_por: `${actingUser.name} (SuperAdmin)`,
+  };
+
+  await set(ref(rtdb, 'configuracion_plataforma'), payload);
+
+  // Sincronizar también umbrales globales en /configuracion_alertas/global para el motor de alertas
+  try {
+    const existingGlobalSnap = await get(ref(rtdb, 'configuracion_alertas/global')).catch(() => null);
+    const baseGlobal = existingGlobalSnap?.exists() ? existingGlobalSnap.val() : DEFAULT_GLOBAL_THRESHOLDS;
+    await set(ref(rtdb, 'configuracion_alertas/global'), {
+      ...baseGlobal,
+      dispositivo_id: 'global',
+      mq2: {
+        ...DEFAULT_GLOBAL_THRESHOLDS.mq2,
+        ...(baseGlobal.mq2 || {}),
+        preventivo: m.coPreventivo,
+        advertencia: m.coAdvertencia,
+        critico: m.coCritico,
+      },
+      pm25: {
+        ...DEFAULT_GLOBAL_THRESHOLDS.pm25,
+        ...(baseGlobal.pm25 || {}),
+        preventivo: m.pm25Preventivo,
+        advertencia: m.pm25Advertencia,
+        critico: m.pm25Critico,
+      },
+      temperatura: {
+        ...DEFAULT_GLOBAL_THRESHOLDS.temperatura,
+        ...(baseGlobal.temperatura || {}),
+        preventivo: m.tempPreventivo,
+        advertencia: m.tempAdvertencia,
+        critico: m.tempCritico,
+      },
+      humedad: {
+        ...DEFAULT_GLOBAL_THRESHOLDS.humedad,
+        ...(baseGlobal.humedad || {}),
+        preventivo: m.humPreventivo,
+        advertencia: m.humAdvertencia,
+        critico: m.humCritico,
+      },
+      actualizado_en: Date.now(),
+      actualizado_por: `${actingUser.name} (SuperAdmin Maestro)`,
+    });
+  } catch (syncErr) {
+    console.warn('Error syncing global alert thresholds from platform config:', syncErr);
+  }
+}
+
+export async function resetPlatformConfigToDefault(
+  actingUser: UserProfile
+): Promise<PlatformConfig> {
+  if (actingUser.role !== 'superadmin') {
+    throw new Error('Acceso denegado: Solo el SuperAdministrador puede restaurar la configuración maestra.');
+  }
+  const restored: PlatformConfig = {
+    ...DEFAULT_PLATFORM_CONFIG,
+    actualizado_en: Date.now(),
+    actualizado_por: `${actingUser.name} (Restauración SuperAdmin)`,
+  };
+  await set(ref(rtdb, 'configuracion_plataforma'), restored);
+  return restored;
+}
+
 
 
 

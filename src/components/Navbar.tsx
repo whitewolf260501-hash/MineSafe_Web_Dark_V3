@@ -26,8 +26,9 @@ import {
   RotateCcw,
   Sliders
 } from 'lucide-react';
-import { NavigationTab, UserProfile } from '../types';
+import { NavigationTab, PlatformConfig, UserProfile } from '../types';
 import { soundAlert } from '../services/audioAlert';
+import { isTabVisibleForUser } from '../services/firebase';
 
 interface NavbarProps {
   currentTab: NavigationTab;
@@ -47,6 +48,7 @@ interface NavbarProps {
   isLightActive?: boolean;
   onToggleLight?: () => void;
   isDrillActive?: boolean;
+  platformConfig?: PlatformConfig;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -67,6 +69,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   isLightActive = false,
   onToggleLight,
   isDrillActive = false,
+  platformConfig,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(soundAlert.getMutedState());
@@ -77,9 +80,14 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (!muted) soundAlert.playFeedbackBeep();
   };
 
+  const isSuperAdmin = currentUser.role === 'superadmin';
   const isSuperOrAdmin = currentUser.role === 'superadmin' || currentUser.role === 'admin';
+  const showHardwareControls =
+    isSuperAdmin || (platformConfig?.appearance?.allowHardwareControlsForNonSuperAdmin ?? true);
+  const showEmergencyButton =
+    isSuperOrAdmin || (platformConfig?.appearance?.allowEmergencyButtonForOperador ?? true);
 
-  const navLinks: { id: NavigationTab; label: string; shortLabel: string; icon: React.ReactNode; badge?: number }[] = [
+  const allStandardLinks: { id: NavigationTab; label: string; shortLabel: string; icon: React.ReactNode; badge?: number }[] = [
     { id: 'dashboard', label: 'Dashboard', shortLabel: 'Dashboard', icon: <Activity className="w-4 h-4 shrink-0" /> },
     { id: 'monitoreo', label: 'Monitoreo IoT', shortLabel: 'Monitoreo', icon: <Radio className="w-4 h-4 shrink-0" /> },
     { 
@@ -89,25 +97,35 @@ export const Navbar: React.FC<NavbarProps> = ({
       icon: <AlertTriangle className="w-4 h-4 shrink-0" />, 
       badge: activeAlertCount > 0 ? activeAlertCount : undefined 
     },
-    ...(isSuperOrAdmin ? [
-      { 
-        id: 'configuracion_alertas' as NavigationTab, 
-        label: 'Config. Umbrales', 
-        shortLabel: 'Umbrales', 
-        icon: <Sliders className="w-4 h-4 shrink-0 text-amber-400" /> 
-      },
-      { 
-        id: 'equipos' as NavigationTab, 
-        label: 'Equipos y Arriendos', 
-        shortLabel: 'Equipos', 
-        icon: <Cpu className="w-4 h-4 shrink-0" /> 
-      },
-    ] : []),
+    { 
+      id: 'configuracion_alertas', 
+      label: 'Config. Umbrales', 
+      shortLabel: 'Umbrales', 
+      icon: <Sliders className="w-4 h-4 shrink-0 text-amber-400" /> 
+    },
+    { 
+      id: 'equipos', 
+      label: 'Equipos y Arriendos', 
+      shortLabel: 'Equipos', 
+      icon: <Cpu className="w-4 h-4 shrink-0" /> 
+    },
     { id: 'reportes', label: 'Historial y Reportes', shortLabel: 'Reportes', icon: <FileText className="w-4 h-4 shrink-0" /> },
     { id: 'faenas', label: 'Faenas y Sectores', shortLabel: 'Sectores', icon: <MapPin className="w-4 h-4 shrink-0" /> },
-    ...(isSuperOrAdmin ? [
-      { id: 'usuarios' as NavigationTab, label: 'Usuarios y Roles', shortLabel: 'Usuarios', icon: <Users className="w-4 h-4 shrink-0" /> }
-    ] : [])
+    { id: 'usuarios', label: 'Usuarios y Roles', shortLabel: 'Usuarios', icon: <Users className="w-4 h-4 shrink-0" /> },
+  ];
+
+  const navLinks: { id: NavigationTab; label: string; shortLabel: string; icon: React.ReactNode; badge?: number }[] = [
+    ...allStandardLinks.filter((item) => isTabVisibleForUser(item.id, currentUser, platformConfig)),
+    ...(isSuperAdmin
+      ? [
+          {
+            id: 'superadmin_panel' as NavigationTab,
+            label: 'Control Maestro',
+            shortLabel: 'SuperAdmin',
+            icon: <Crown className="w-4 h-4 shrink-0 text-purple-400" />,
+          },
+        ]
+      : []),
   ];
 
   const getRoleTheme = () => {
@@ -212,7 +230,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
 
               {/* Quick Toggle Light Button */}
-              {onToggleLight && (
+              {showHardwareControls && onToggleLight && (
                 <button
                   onClick={onToggleLight}
                   className={`px-1.5 py-1 rounded text-xs flex items-center gap-1 transition-colors shrink-0 ${
@@ -228,7 +246,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
 
               {/* Quick Toggle Alarm Siren Button */}
-              {onToggleAlarm && (
+              {showHardwareControls && onToggleAlarm && (
                 <button
                   onClick={onToggleAlarm}
                   className={`px-1.5 py-1 rounded text-xs flex items-center gap-1 transition-colors shrink-0 ${
@@ -244,7 +262,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
 
               {/* Quick Reset Baseline Button */}
-              {onResetPageLevels && (
+              {showHardwareControls && onResetPageLevels && (
                 <button
                   onClick={onResetPageLevels}
                   className="px-1.5 py-1 rounded text-slate-400 hover:text-cyan-300 hover:bg-slate-800 text-xs flex items-center gap-1 transition-colors shrink-0"
@@ -291,22 +309,24 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
 
             {/* Emergency Protocol Trigger */}
-            <button
-              onClick={onTriggerEmergency}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg shadow-md transition-all whitespace-nowrap shrink-0 ${
-                isDrillActive
-                  ? 'bg-amber-600 hover:bg-amber-500 text-white animate-pulse shadow-amber-950 ring-2 ring-amber-400'
-                  : 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-950 hover:shadow-rose-900'
-              }`}
-              title="Protocolo de Evacuación y Simulacro DS 132"
-            >
-              <ShieldAlert className="w-4 h-4 shrink-0" />
-              <span>
-                {isDrillActive 
-                  ? 'Simulacro Activo' 
-                  : (currentUser?.role === 'superadmin' || currentUser?.role === 'admin' ? 'Simulacro / Evacuación' : 'Evacuación')}
-              </span>
-            </button>
+            {showEmergencyButton && (
+              <button
+                onClick={onTriggerEmergency}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg shadow-md transition-all whitespace-nowrap shrink-0 ${
+                  isDrillActive
+                    ? 'bg-amber-600 hover:bg-amber-500 text-white animate-pulse shadow-amber-950 ring-2 ring-amber-400'
+                    : 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-950 hover:shadow-rose-900'
+                }`}
+                title="Protocolo de Evacuación y Simulacro DS 132"
+              >
+                <ShieldAlert className="w-4 h-4 shrink-0" />
+                <span>
+                  {isDrillActive 
+                    ? 'Simulacro Activo' 
+                    : (currentUser?.role === 'superadmin' || currentUser?.role === 'admin' ? 'Simulacro / Evacuación' : 'Evacuación')}
+                </span>
+              </button>
+            )}
           </div>
 
           {/* Mobile menu trigger button */}
@@ -342,8 +362,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                   }}
                   className={`flex items-center gap-2 px-3 py-1.5 text-xs lg:text-sm font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 ${
                     isActive
-                      ? 'bg-cyan-950/80 text-cyan-300 border border-cyan-700/70 shadow-sm shadow-cyan-950/50'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60 border border-transparent'
+                      ? item.id === 'superadmin_panel'
+                        ? 'bg-purple-950/90 text-purple-200 border border-purple-500/80 shadow-sm shadow-purple-950/60'
+                        : 'bg-cyan-950/80 text-cyan-300 border border-cyan-700/70 shadow-sm shadow-cyan-950/50'
+                      : item.id === 'superadmin_panel'
+                        ? 'text-purple-300 hover:text-purple-100 hover:bg-purple-950/40 border border-purple-900/50'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60 border border-transparent'
                   }`}
                   title={item.label}
                 >
@@ -363,7 +387,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="hidden lg:flex items-center gap-3 shrink-0 pl-2">
             <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
               <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-              <span>Faena El Teniente · Nivel -510m</span>
+              <span>{platformConfig?.appearance?.siteBadgeText || 'Faena El Teniente · Nivel -510m'}</span>
             </div>
           </div>
         </div>
@@ -414,17 +438,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <UserCheck className="w-4 h-4 text-cyan-400" />
                 <span>{currentUser.name} ({roleTheme.badgeText})</span>
               </button>
-              <button
-                onClick={() => {
-                  onTriggerEmergency();
-                  setMobileMenuOpen(false);
-                }}
-                className={`px-3 py-2 text-xs font-semibold rounded-lg text-white ${
-                  isDrillActive ? 'bg-amber-600 animate-pulse' : 'bg-rose-600'
-                }`}
-              >
-                {isDrillActive ? 'Simulacro Activo' : (currentUser?.role === 'superadmin' || currentUser?.role === 'admin' ? 'Simulacro / Evacuación' : 'Evacuación')}
-              </button>
+              {showEmergencyButton && (
+                <button
+                  onClick={() => {
+                    onTriggerEmergency();
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`px-3 py-2 text-xs font-semibold rounded-lg text-white ${
+                    isDrillActive ? 'bg-amber-600 animate-pulse' : 'bg-rose-600'
+                  }`}
+                >
+                  {isDrillActive ? 'Simulacro Activo' : (currentUser?.role === 'superadmin' || currentUser?.role === 'admin' ? 'Simulacro / Evacuación' : 'Evacuación')}
+                </button>
+              )}
             </div>
 
             {onLogout && (

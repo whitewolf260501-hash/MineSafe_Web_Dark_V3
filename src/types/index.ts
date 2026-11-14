@@ -196,7 +196,7 @@ export interface UserProfile {
   assignedDeviceCode?: string;
 }
 
-export type NavigationTab = 
+export type ControllableTab =
   | 'dashboard'
   | 'monitoreo'
   | 'alertas'
@@ -205,6 +205,76 @@ export type NavigationTab =
   | 'reportes'
   | 'faenas'
   | 'usuarios';
+
+export type NavigationTab = ControllableTab | 'superadmin_panel';
+
+export type WindowOverrideValue = 'inherit' | 'allow' | 'block';
+
+export interface PlatformVisibilityConfig {
+  rolePermissions: {
+    admin: Record<ControllableTab, boolean>;
+    operador: Record<ControllableTab, boolean>;
+  };
+  userOverrides: Record<string, Partial<Record<ControllableTab, WindowOverrideValue>>>;
+}
+
+export interface PlatformMetricsConfig {
+  coPreventivo: number;
+  coAdvertencia: number;
+  coCritico: number;
+  coChartSafeMax: number;
+  pm25Preventivo: number;
+  pm25Advertencia: number;
+  pm25Critico: number;
+  pm25ChartSafeMax: number;
+  tempMin: number;
+  tempPreventivo: number;
+  tempAdvertencia: number;
+  tempCritico: number;
+  humMin: number;
+  humPreventivo: number;
+  humAdvertencia: number;
+  humCritico: number;
+  airFlowMin: number;
+  airFlowMax: number;
+  batteryMin: number;
+  co2SafeMax: number;
+  co2CriticalMax: number;
+  ch4SafeMax: number;
+  ch4CriticalMax: number;
+  o2MinSafe: number;
+  noiseSafeMax: number;
+  noiseCriticalMax: number;
+  gatewayTimeoutSeconds: number;
+  emergencyGasThreshold: number;
+  emergencyDustThreshold: number;
+}
+
+export interface PlatformAppearanceConfig {
+  platformTitle: string;
+  platformSubtitle: string;
+  siteBadgeText: string;
+  footerText: string;
+  announcementEnabled: boolean;
+  announcementText: string;
+  announcementTone: 'info' | 'warning' | 'critical';
+  showChartsAndUsers: boolean;
+  showESP32Section: boolean;
+  showDualSensorCards: boolean;
+  showHeroMetricCards: boolean;
+  showCapabilitiesGrid: boolean;
+  showAdditionalGasesRow: boolean;
+  allowHardwareControlsForNonSuperAdmin: boolean;
+  allowEmergencyButtonForOperador: boolean;
+}
+
+export interface PlatformConfig {
+  visibility: PlatformVisibilityConfig;
+  metrics: PlatformMetricsConfig;
+  appearance: PlatformAppearanceConfig;
+  actualizado_en: number;
+  actualizado_por: string;
+}
 
 export type AlertThresholdLevel = 'normal' | 'preventivo' | 'advertencia' | 'critico';
 

@@ -8,6 +8,7 @@ import { HistoricalReportsView } from './components/HistoricalReportsView';
 import { MiningSectorsView } from './components/MiningSectorsView';
 import { UsersManagementView } from './components/UsersManagementView';
 import { AlertConfigurationView } from './components/AlertConfigurationView';
+import { SuperAdminControlView } from './components/SuperAdminControlView';
 import { LoginModal } from './components/LoginModal';
 import { EmergencyModal, DrillType } from './components/EmergencyModal';
 import { alertEngine } from './services/alertEngine';
@@ -15,6 +16,7 @@ import { alertEngine } from './services/alertEngine';
 
 import { 
   NavigationTab, 
+  ControllableTab,
   TelemetryVariable, 
   SensorDevice, 
   SafetyAlert, 
@@ -24,7 +26,8 @@ import {
   UserProfile,
   UserRole,
   AlertResolutionDetails,
-  DrillDebriefRecord
+  DrillDebriefRecord,
+  PlatformConfig
 } from './types';
 
 import { 
@@ -55,11 +58,14 @@ import {
   broadcastAlertToRTDB,
   subscribeToRTDBDrill,
   resolveAlertInRTDB,
-  saveDrillDebriefInRTDB
+  saveDrillDebriefInRTDB,
+  DEFAULT_PLATFORM_CONFIG,
+  subscribeToPlatformConfig,
+  isTabVisibleForUser
 } from './services/firebase';
 
 import { soundAlert } from './services/audioAlert';
-import { ShieldAlert, AlertTriangle, X } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, X, Megaphone, Lock } from 'lucide-react';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
@@ -93,6 +99,7 @@ export default function App() {
   const [dismissEmergencyBanner, setDismissEmergencyBanner] = useState<boolean>(false);
   const [isDrillActive, setIsDrillActive] = useState<boolean>(false);
   const [drillType, setDrillType] = useState<DrillType | null>(null);
+  const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
 
   // Initialize and connect to user's Firebase Realtime Database
   useEffect(() => {
@@ -100,6 +107,7 @@ export default function App() {
     let unsubUsers: (() => void) | null = null;
     let unsubRentals: (() => void) | null = null;
     let unsubDrill: (() => void) | null = null;
+    let unsubPlatform: (() => void) | null = null;
 
     async function initRealtimeDatabase() {
       const connected = await testConnection();
@@ -151,6 +159,11 @@ export default function App() {
           setDismissEmergencyBanner(false);
         }
       });
+
+      // Realtime listener for SuperAdmin master platform configuration
+      unsubPlatform = subscribeToPlatformConfig((cfg) => {
+        setPlatformConfig(cfg);
+      });
     }
 
     initRealtimeDatabase();
@@ -160,137 +173,146 @@ export default function App() {
       if (unsubUsers) unsubUsers();
       if (unsubRentals) unsubRentals();
       if (unsubDrill) unsubDrill();
+      if (unsubPlatform) unsubPlatform();
     };
   }, []);
 
-  // Synchronize dashboard variables directly with the real active device from RTDB
+  // Synchronize dashboard variables directly with the real active device from RTDB + SuperAdmin metrics config
   useEffect(() => {
     const targetDev = devices.find(d => d.id === activeTelemetryDeviceId) || devices[0];
+    const m = platformConfig.metrics;
     if (targetDev && targetDev.metrics) {
+      const tempVal = targetDev.metrics.temperatura;
+      const humVal = targetDev.metrics.humedad;
+      const coVal = targetDev.metrics.co;
+      const pmVal = targetDev.metrics.polvoPM;
+      const airVal = targetDev.metrics.flujoAire;
+      const batVal = targetDev.batteryPct;
+
       setVariables([
         {
           id: 'temp',
           name: 'TEMPERATURA AMBIENTE',
           shortName: 'Temperatura',
-          value: targetDev.metrics.temperatura,
+          value: tempVal,
           unit: '°C',
-          trend: 'estable',
-          status: targetDev.metrics.temperatura > 30 ? 'critico' : 'normal',
-          statusLabel: targetDev.metrics.temperatura > 30 ? 'Alerta' : 'Estable',
-          thresholdMin: 10,
-          thresholdMax: 28,
+          trend: tempVal >= m.tempPreventivo ? 'alza critica' : 'estable',
+          status: tempVal >= m.tempCritico ? 'critico' : tempVal >= m.tempPreventivo ? 'advertencia' : 'normal',
+          statusLabel: tempVal >= m.tempCritico ? 'Crítica' : tempVal >= m.tempPreventivo ? 'Alerta' : 'Estable',
+          thresholdMin: m.tempMin,
+          thresholdMax: m.tempPreventivo,
           lastUpdateSeconds: 0,
           historical: [
-            { timestamp: '00:00', value: Number((targetDev.metrics.temperatura - 1.2).toFixed(1)) },
-            { timestamp: '04:00', value: Number((targetDev.metrics.temperatura - 0.8).toFixed(1)) },
-            { timestamp: '08:00', value: Number((targetDev.metrics.temperatura - 0.3).toFixed(1)) },
-            { timestamp: '12:00', value: Number((targetDev.metrics.temperatura + 0.4).toFixed(1)) },
-            { timestamp: '16:00', value: targetDev.metrics.temperatura },
+            { timestamp: '00:00', value: Number((tempVal - 1.2).toFixed(1)) },
+            { timestamp: '04:00', value: Number((tempVal - 0.8).toFixed(1)) },
+            { timestamp: '08:00', value: Number((tempVal - 0.3).toFixed(1)) },
+            { timestamp: '12:00', value: Number((tempVal + 0.4).toFixed(1)) },
+            { timestamp: '16:00', value: tempVal },
           ],
         },
         {
           id: 'hum',
           name: 'HUMEDAD RELATIVA',
           shortName: 'Humedad',
-          value: targetDev.metrics.humedad,
+          value: humVal,
           unit: '%',
           trend: 'estable',
-          status: 'normal',
-          statusLabel: 'Normal',
-          thresholdMin: 30,
-          thresholdMax: 75,
+          status: humVal >= m.humCritico ? 'critico' : humVal >= m.humPreventivo ? 'advertencia' : 'normal',
+          statusLabel: humVal >= m.humCritico ? 'Crítica' : humVal >= m.humPreventivo ? 'Elevada' : 'Normal',
+          thresholdMin: m.humMin,
+          thresholdMax: m.humCritico,
           lastUpdateSeconds: 0,
           historical: [
-            { timestamp: '00:00', value: Math.max(0, targetDev.metrics.humedad - 2) },
-            { timestamp: '04:00', value: Math.max(0, targetDev.metrics.humedad - 1) },
-            { timestamp: '08:00', value: targetDev.metrics.humedad },
-            { timestamp: '12:00', value: targetDev.metrics.humedad + 1 },
-            { timestamp: '16:00', value: targetDev.metrics.humedad },
+            { timestamp: '00:00', value: Math.max(0, humVal - 2) },
+            { timestamp: '04:00', value: Math.max(0, humVal - 1) },
+            { timestamp: '08:00', value: humVal },
+            { timestamp: '12:00', value: humVal + 1 },
+            { timestamp: '16:00', value: humVal },
           ],
         },
         {
           id: 'co2',
           name: 'MONÓXIDO DE CARBONO (CO)',
           shortName: 'Gas CO',
-          value: targetDev.metrics.co,
+          value: coVal,
           unit: 'ppm',
-          trend: targetDev.metrics.co > 50 ? 'alza critica' : 'estable',
-          status: targetDev.metrics.co > 50 ? 'critico' : 'normal',
-          statusLabel: targetDev.metrics.co > 50 ? 'Crítico (DS 132)' : 'Seguro',
+          trend: coVal >= m.coChartSafeMax ? 'alza critica' : 'estable',
+          status: coVal >= m.coChartSafeMax * 1.5 ? 'critico' : coVal >= m.coChartSafeMax ? 'advertencia' : 'normal',
+          statusLabel: coVal >= m.coChartSafeMax * 1.5 ? 'Crítico (DS 132)' : coVal >= m.coChartSafeMax ? 'Preventivo' : 'Seguro',
           thresholdMin: 0,
-          thresholdMax: 25,
+          thresholdMax: m.coChartSafeMax,
           lastUpdateSeconds: 0,
           historical: [
-            { timestamp: '00:00', value: Math.max(0, targetDev.metrics.co - 10) },
-            { timestamp: '04:00', value: Math.max(0, targetDev.metrics.co - 5) },
-            { timestamp: '08:00', value: targetDev.metrics.co },
-            { timestamp: '12:00', value: targetDev.metrics.co },
-            { timestamp: '16:00', value: targetDev.metrics.co },
+            { timestamp: '00:00', value: Math.max(0, coVal - 10) },
+            { timestamp: '04:00', value: Math.max(0, coVal - 5) },
+            { timestamp: '08:00', value: coVal },
+            { timestamp: '12:00', value: coVal },
+            { timestamp: '16:00', value: coVal },
           ],
         },
         {
           id: 'lux',
           name: 'MATERIAL PARTICULADO (PM2.5)',
           shortName: 'Polvo PM2.5',
-          value: targetDev.metrics.polvoPM,
+          value: pmVal,
           unit: 'µg/m³',
-          trend: targetDev.metrics.polvoPM > 1000 ? 'alza critica' : 'estable',
-          status: targetDev.metrics.polvoPM > 1000 ? 'critico' : 'normal',
-          statusLabel: targetDev.metrics.polvoPM > 1000 ? 'Polvo Elevado' : 'Norma OK',
+          trend: pmVal >= m.pm25Critico ? 'alza critica' : 'estable',
+          status: pmVal >= m.pm25Critico ? 'critico' : pmVal >= m.pm25Preventivo ? 'advertencia' : 'normal',
+          statusLabel: pmVal >= m.pm25Critico ? 'Polvo Elevado' : pmVal >= m.pm25Preventivo ? 'Preventivo' : 'Norma OK',
           thresholdMin: 0,
-          thresholdMax: 500,
+          thresholdMax: m.pm25ChartSafeMax,
           lastUpdateSeconds: 0,
           historical: [
-            { timestamp: '00:00', value: Math.max(0, targetDev.metrics.polvoPM - 100) },
-            { timestamp: '04:00', value: targetDev.metrics.polvoPM },
-            { timestamp: '08:00', value: targetDev.metrics.polvoPM },
-            { timestamp: '12:00', value: targetDev.metrics.polvoPM },
-            { timestamp: '16:00', value: targetDev.metrics.polvoPM },
+            { timestamp: '00:00', value: Math.max(0, pmVal - 100) },
+            { timestamp: '04:00', value: pmVal },
+            { timestamp: '08:00', value: pmVal },
+            { timestamp: '12:00', value: pmVal },
+            { timestamp: '16:00', value: pmVal },
           ],
         },
         {
           id: 'kwh',
           name: 'BATERÍA DISPOSITIVO IoT',
           shortName: 'Batería Sensor',
-          value: targetDev.batteryPct,
+          value: batVal,
           unit: '%',
           trend: 'estable',
-          status: targetDev.batteryPct < 20 ? 'advertencia' : 'normal',
-          statusLabel: targetDev.batteryPct > 50 ? 'Óptima' : 'Recargar',
-          thresholdMin: 20,
+          status: batVal < m.batteryMin ? 'advertencia' : 'normal',
+          statusLabel: batVal >= m.batteryMin ? 'Óptima' : 'Recargar',
+          thresholdMin: m.batteryMin,
           thresholdMax: 100,
           lastUpdateSeconds: 0,
           historical: [
             { timestamp: '00:00', value: 98 },
             { timestamp: '04:00', value: 97 },
             { timestamp: '08:00', value: 96 },
-            { timestamp: '12:00', value: targetDev.batteryPct },
-            { timestamp: '16:00', value: targetDev.batteryPct },
+            { timestamp: '12:00', value: batVal },
+            { timestamp: '16:00', value: batVal },
           ],
         },
         {
           id: 'air_flow',
           name: 'FLUJO DE VENTILACIÓN',
           shortName: 'Ventilación',
-          value: targetDev.metrics.flujoAire,
+          value: airVal,
           unit: 'm/s',
           trend: 'estable',
-          status: targetDev.metrics.flujoAire < 0.5 ? 'critico' : 'normal',
-          statusLabel: 'Circulación Activa',
-          thresholdMin: 0.5,
-          thresholdMax: 3.0,
+          status: airVal < m.airFlowMin ? 'critico' : 'normal',
+          statusLabel: airVal < m.airFlowMin ? 'Flujo Insuficiente' : 'Circulación Activa',
+          thresholdMin: m.airFlowMin,
+          thresholdMax: m.airFlowMax,
           lastUpdateSeconds: 0,
           historical: [
             { timestamp: '00:00', value: 1.2 },
             { timestamp: '04:00', value: 1.3 },
             { timestamp: '08:00', value: 1.25 },
-            { timestamp: '12:00', value: targetDev.metrics.flujoAire },
-            { timestamp: '16:00', value: targetDev.metrics.flujoAire },
+            { timestamp: '12:00', value: airVal },
+            { timestamp: '16:00', value: airVal },
           ],
         },
       ]);
     }
-  }, [devices, activeTelemetryDeviceId]);
+  }, [devices, activeTelemetryDeviceId, platformConfig]);
 
   // Second counter for last updated
   useEffect(() => {
@@ -730,26 +752,50 @@ export default function App() {
   const rawGas = activeDevice?.rawCO !== undefined ? activeDevice.rawCO : activeDevice?.metrics?.co || 0;
   const rawDust = activeDevice?.rawPM25 !== undefined ? activeDevice.rawPM25 : activeDevice?.metrics?.polvoPM || 0;
 
-  const isGasCritical = isDeviceOnline && rawGas >= 1000;
-  const isDustCritical = isDeviceOnline && rawDust >= 500;
+  const isGasCritical = isDeviceOnline && rawGas >= platformConfig.metrics.emergencyGasThreshold;
+  const isDustCritical = isDeviceOnline && rawDust >= platformConfig.metrics.emergencyDustThreshold;
   const isFieldEmergencyActive = (isGasCritical || isDustCritical || isAlarmActive || isDrillActive) && !dismissEmergencyBanner;
 
-  const isSuperOrAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
+  const CONTROLLABLE_ORDER: ControllableTab[] = [
+    'dashboard',
+    'monitoreo',
+    'alertas',
+    'reportes',
+    'faenas',
+    'configuracion_alertas',
+    'equipos',
+    'usuarios',
+  ];
 
-  // Proteger pestañas administrativas contra accesos no autorizados de usuarios normales
+  // Proteger todas las ventanas según las reglas dinámicas del SuperAdministrador
   useEffect(() => {
-    if (!isSuperOrAdmin && (currentTab === 'configuracion_alertas' || currentTab === 'equipos' || currentTab === 'usuarios')) {
-      setCurrentTab('dashboard');
+    if (!currentUser) return;
+    if (!isTabVisibleForUser(currentTab, currentUser, platformConfig)) {
+      const firstAllowed = CONTROLLABLE_ORDER.find((tab) =>
+        isTabVisibleForUser(tab, currentUser, platformConfig)
+      );
+      if (firstAllowed && firstAllowed !== currentTab) {
+        setCurrentTab(firstAllowed);
+      }
     }
-  }, [isSuperOrAdmin, currentTab]);
+  }, [currentUser, currentTab, platformConfig]);
 
   const handleSelectTab = useCallback((tab: NavigationTab) => {
-    if (!isSuperOrAdmin && (tab === 'configuracion_alertas' || tab === 'equipos' || tab === 'usuarios')) {
-      setCurrentTab('dashboard');
+    if (!currentUser) return;
+    if (tab === 'superadmin_panel' && currentUser.role !== 'superadmin') {
+      return;
+    }
+    if (!isTabVisibleForUser(tab, currentUser, platformConfig)) {
+      const firstAllowed = CONTROLLABLE_ORDER.find((t) =>
+        isTabVisibleForUser(t, currentUser, platformConfig)
+      );
+      if (firstAllowed) {
+        setCurrentTab(firstAllowed);
+      }
       return;
     }
     setCurrentTab(tab);
-  }, [isSuperOrAdmin]);
+  }, [currentUser, platformConfig]);
 
   // GATEKEEPER: Require login before entering the application
   if (!currentUser) {
@@ -788,7 +834,29 @@ export default function App() {
         isLightActive={isLightActive}
         onToggleLight={handleToggleLight}
         isDrillActive={isDrillActive}
+        platformConfig={platformConfig}
       />
+
+      {/* Global Announcement Banner (Configurado por SuperAdministrador) */}
+      {platformConfig.appearance.announcementEnabled && platformConfig.appearance.announcementText.trim() !== '' && (
+        <div
+          className={`px-4 py-2.5 border-b text-xs sm:text-sm font-semibold ${
+            platformConfig.appearance.announcementTone === 'critical'
+              ? 'bg-red-950/90 border-red-700 text-red-100'
+              : platformConfig.appearance.announcementTone === 'warning'
+              ? 'bg-amber-950/90 border-amber-700 text-amber-100'
+              : 'bg-cyan-950/90 border-cyan-800 text-cyan-100'
+          }`}
+        >
+          <div className="max-w-[1850px] w-full mx-auto flex items-center gap-2.5">
+            <Megaphone className="w-4 h-4 shrink-0" />
+            <span className="uppercase tracking-wider text-[10px] font-black px-2 py-0.5 rounded bg-black/30 border border-white/15 shrink-0">
+              Aviso Dirección
+            </span>
+            <span>{platformConfig.appearance.announcementText}</span>
+          </div>
+        </div>
+      )}
 
       {/* Global Emergency Banner (Prompt Req 4) */}
       {isFieldEmergencyActive && (
@@ -878,138 +946,130 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-[1850px] w-full mx-auto px-3 sm:px-4 lg:px-6 py-6 sm:py-8">
-        
-        {currentTab === 'dashboard' && (
-          <DashboardView
-            variables={variables}
-            activeAlerts={activeAlerts}
-            currentSite={currentSite}
-            devices={devices}
-            activeTelemetryDeviceId={activeTelemetryDeviceId}
-            onSelectTelemetryDevice={setActiveTelemetryDeviceId}
-            onNavigateTab={setCurrentTab}
-            onSelectSensor={(sensorId) => {
-              setSelectedSensorId(sensorId);
-              setCurrentTab('monitoreo');
-            }}
-            onAcknowledgeAlert={handleAcknowledgeAlert}
-            onResetPageLevels={handleResetPageLevels}
-            isAlarmActive={isAlarmActive}
-            onToggleAlarm={handleToggleAlarm}
-            isLightActive={isLightActive}
-            onToggleLight={handleToggleLight}
-            currentUser={currentUser}
-            usersList={usersList}
-            onChangeUserModal={() => setShowLoginModal(true)}
-          />
-        )}
 
-        {currentTab === 'monitoreo' && (
-          <MonitoringView
-            devices={devices}
-            currentSite={currentSite}
-            selectedSensorId={selectedSensorId}
-            onSelectSensor={setSelectedSensorId}
-            onSimulateGasSpike={handleSimulateGasSpike}
-            onResetSensor={handleResetSensor}
-          />
-        )}
+        {!isTabVisibleForUser(currentTab, currentUser, platformConfig) ? (
+          <div className="p-8 text-center bg-slate-900/80 border border-red-900/50 rounded-2xl max-w-xl mx-auto my-12 shadow-xl">
+            <Lock className="w-12 h-12 text-red-400 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-white mb-2">Ventana Bloqueada por el SuperAdministrador</h2>
+            <p className="text-slate-400 text-sm mb-4">
+              El SuperAdministrador ha restringido temporalmente el acceso a esta ventana para tu usuario o rol.
+            </p>
+            <p className="text-xs text-slate-500">
+              Si necesitas acceso a este módulo operativo, comunícate con el SuperAdministrador de MineSafe IoT.
+            </p>
+          </div>
+        ) : (
+          <>
+            {currentTab === 'dashboard' && (
+              <DashboardView
+                variables={variables}
+                activeAlerts={activeAlerts}
+                currentSite={currentSite}
+                devices={devices}
+                activeTelemetryDeviceId={activeTelemetryDeviceId}
+                onSelectTelemetryDevice={setActiveTelemetryDeviceId}
+                onNavigateTab={handleSelectTab}
+                onSelectSensor={(sensorId) => {
+                  setSelectedSensorId(sensorId);
+                  handleSelectTab('monitoreo');
+                }}
+                onAcknowledgeAlert={handleAcknowledgeAlert}
+                onResetPageLevels={handleResetPageLevels}
+                isAlarmActive={isAlarmActive}
+                onToggleAlarm={handleToggleAlarm}
+                isLightActive={isLightActive}
+                onToggleLight={handleToggleLight}
+                currentUser={currentUser}
+                usersList={usersList}
+                onChangeUserModal={() => setShowLoginModal(true)}
+                platformConfig={platformConfig}
+              />
+            )}
 
-        {currentTab === 'alertas' && (
-          <AlertsView
-            alerts={alerts}
-            devices={devices}
-            currentUser={currentUser}
-            onAcknowledgeAlert={handleAcknowledgeAlert}
-            onResolveAlert={handleResolveAlert}
-            onResolveAlertWithDetails={handleResolveAlertWithDetails}
-            onTriggerForcedVentilation={handleTriggerForcedVentilation}
-            onNavigateTab={setCurrentTab}
-            onSelectSensor={(sensorId) => {
-              setSelectedSensorId(sensorId);
-              setCurrentTab('monitoreo');
-            }}
-          />
-        )}
+            {currentTab === 'monitoreo' && (
+              <MonitoringView
+                devices={devices}
+                currentSite={currentSite}
+                selectedSensorId={selectedSensorId}
+                onSelectSensor={setSelectedSensorId}
+                onSimulateGasSpike={handleSimulateGasSpike}
+                onResetSensor={handleResetSensor}
+              />
+            )}
 
-        {currentTab === 'configuracion_alertas' && (
-          isSuperOrAdmin ? (
-            <AlertConfigurationView
-              devices={devices}
-              currentUser={currentUser}
-            />
-          ) : (
-            <div className="p-8 text-center bg-slate-900/80 border border-slate-800 rounded-2xl max-w-xl mx-auto my-12 shadow-xl">
-              <ShieldAlert className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-              <h2 className="text-xl font-bold text-white mb-2">Acceso Restringido</h2>
-              <p className="text-slate-400 text-sm mb-6">
-                El módulo de Configuración de Umbrales está reservado únicamente para Administradores y Prevencionistas de Riesgos autorizados.
-              </p>
-              <button
-                onClick={() => setCurrentTab('dashboard')}
-                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg text-sm transition-colors shadow-lg"
-              >
-                Volver al Dashboard
-              </button>
-            </div>
-          )
-        )}
+            {currentTab === 'alertas' && (
+              <AlertsView
+                alerts={alerts}
+                devices={devices}
+                currentUser={currentUser}
+                onAcknowledgeAlert={handleAcknowledgeAlert}
+                onResolveAlert={handleResolveAlert}
+                onResolveAlertWithDetails={handleResolveAlertWithDetails}
+                onTriggerForcedVentilation={handleTriggerForcedVentilation}
+                onNavigateTab={handleSelectTab}
+                onSelectSensor={(sensorId) => {
+                  setSelectedSensorId(sensorId);
+                  handleSelectTab('monitoreo');
+                }}
+              />
+            )}
 
-        {currentTab === 'equipos' && (
-          isSuperOrAdmin ? (
-            <DevicesAndRentalsView
-              rentals={rentals}
-              assignments={assignments}
-              devices={devices}
-              onAddAssignment={handleAddAssignment}
-              onAddRentalContract={handleAddRentalContract}
-              onRecordPayment={handleRecordPayment}
-            />
-          ) : (
-            <div className="p-8 text-center bg-slate-900/80 border border-slate-800 rounded-2xl max-w-xl mx-auto my-12 shadow-xl">
-              <ShieldAlert className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-              <h2 className="text-xl font-bold text-white mb-2">Acceso Restringido</h2>
-              <p className="text-slate-400 text-sm mb-6">
-                El módulo de Equipos y Contratos de Arriendo está reservado para Administradores y Supervisores de Faena.
-              </p>
-              <button
-                onClick={() => setCurrentTab('dashboard')}
-                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg text-sm transition-colors shadow-lg"
-              >
-                Volver al Dashboard
-              </button>
-            </div>
-          )
-        )}
+            {currentTab === 'configuracion_alertas' && (
+              <AlertConfigurationView
+                devices={devices}
+                currentUser={currentUser}
+              />
+            )}
 
-        {currentTab === 'reportes' && (
-          <HistoricalReportsView
-            variables={variables}
-            currentSite={currentSite}
-          />
-        )}
+            {currentTab === 'equipos' && (
+              <DevicesAndRentalsView
+                rentals={rentals}
+                assignments={assignments}
+                devices={devices}
+                onAddAssignment={handleAddAssignment}
+                onAddRentalContract={handleAddRentalContract}
+                onRecordPayment={handleRecordPayment}
+              />
+            )}
 
-        {currentTab === 'faenas' && (
-          <MiningSectorsView
-            currentSite={currentSite}
-            allSites={sites}
-            onSelectSite={(siteId) => {
-              const found = sites.find(s => s.id === siteId);
-              if (found) setCurrentSite(found);
-            }}
-            onAddSite={handleAddSite}
-            onNavigateTab={setCurrentTab}
-          />
-        )}
+            {currentTab === 'reportes' && (
+              <HistoricalReportsView
+                variables={variables}
+                currentSite={currentSite}
+              />
+            )}
 
-        {currentTab === 'usuarios' && (
-          <UsersManagementView
-            currentUser={currentUser}
-            usersList={usersList}
-            onAddUser={handleAddUser}
-            onUpdateUserRole={handleUpdateUserRole}
-            onToggleUserStatus={handleToggleUserStatus}
-          />
+            {currentTab === 'faenas' && (
+              <MiningSectorsView
+                currentSite={currentSite}
+                allSites={sites}
+                onSelectSite={(siteId) => {
+                  const found = sites.find(s => s.id === siteId);
+                  if (found) setCurrentSite(found);
+                }}
+                onAddSite={handleAddSite}
+                onNavigateTab={handleSelectTab}
+              />
+            )}
+
+            {currentTab === 'usuarios' && (
+              <UsersManagementView
+                currentUser={currentUser}
+                usersList={usersList}
+                onAddUser={handleAddUser}
+                onUpdateUserRole={handleUpdateUserRole}
+                onToggleUserStatus={handleToggleUserStatus}
+              />
+            )}
+
+            {currentTab === 'superadmin_panel' && currentUser.role === 'superadmin' && (
+              <SuperAdminControlView
+                currentUser={currentUser}
+                usersList={usersList}
+                platformConfig={platformConfig}
+              />
+            )}
+          </>
         )}
 
       </main>
@@ -1056,7 +1116,7 @@ export default function App() {
             <span>Sistema de Monitoreo y Alertas para Seguridad Minera</span>
           </div>
           <div>
-            <span>Cumplimiento Normativo DS 132 / Sernageomin · Plataforma Industrial</span>
+            <span>{platformConfig.appearance.footerText}</span>
           </div>
         </div>
       </footer>

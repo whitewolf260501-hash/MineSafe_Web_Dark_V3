@@ -32,11 +32,13 @@ import {
   MiningSite, 
   NavigationTab, 
   SensorDevice,
-  UserProfile 
+  UserProfile,
+  PlatformConfig
 } from '../types';
 import { ESP32GatewaySection } from './ESP32GatewaySection';
 import { DualReadingSensorCards } from './DualReadingSensorCards';
 import { InteractiveDeviceChartAndUsers } from './InteractiveDeviceChartAndUsers';
+import { isTabVisibleForUser } from '../services/firebase';
 
 interface DashboardViewProps {
   variables: TelemetryVariable[];
@@ -56,6 +58,7 @@ interface DashboardViewProps {
   currentUser?: UserProfile | null;
   usersList?: UserProfile[];
   onChangeUserModal?: () => void;
+  platformConfig?: PlatformConfig;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -76,9 +79,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   currentUser,
   usersList = [],
   onChangeUserModal,
+  platformConfig,
 }) => {
   const activeDevice = devices.find(d => d.id === activeTelemetryDeviceId) || devices[0];
-  const isSuperOrAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
+  const canSeeEquipos = isTabVisibleForUser('equipos', currentUser ?? null, platformConfig);
+  const canSeeUsuarios = isTabVisibleForUser('usuarios', currentUser ?? null, platformConfig);
+  const canSeeAlertas = isTabVisibleForUser('alertas', currentUser ?? null, platformConfig);
+  const canSeeMonitoreo = isTabVisibleForUser('monitoreo', currentUser ?? null, platformConfig);
+  const canSeeReportes = isTabVisibleForUser('reportes', currentUser ?? null, platformConfig);
+  const canSeeFaenas = isTabVisibleForUser('faenas', currentUser ?? null, platformConfig);
+
+  const safeNavigate = (tab: NavigationTab) => {
+    if (isTabVisibleForUser(tab, currentUser ?? null, platformConfig)) {
+      onNavigateTab(tab);
+    }
+  };
+
+  const appCfg = platformConfig?.appearance;
+  const metCfg = platformConfig?.metrics;
 
   // Main 6 hero variables (matching reference image)
   const tempVar = variables.find(v => v.id === 'temp') || variables[0];
@@ -153,10 +171,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             Control Operacional en Tiempo Real · {currentSite.name}
           </div>
           <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-white">
-            MineSafe: Monitoreo IoT y Seguridad Minera
+            {appCfg?.platformTitle || 'MineSafe: Monitoreo IoT y Seguridad Minera'}
           </h1>
           <p className="mt-2 text-sm sm:text-base text-slate-300 max-w-2xl leading-relaxed">
-            Supervisión ambiental subterránea continua, control de gases críticos, ventilación de galerías y respuesta temprana ante incidentes.
+            {appCfg?.platformSubtitle || 'Supervisión ambiental subterránea continua, control de gases críticos, ventilación de galerías y respuesta temprana ante incidentes.'}
           </p>
         </div>
 
@@ -186,43 +204,49 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             MODERN DASHBOARD UI: BIENVENIDA, GRÁFICO CON SELECTOR DE DISPOSITIVO
             Y RECUADRO DE USUARIOS CON SCROLL
            ============================================================== */}
-        <div className="relative z-10 mb-10">
-          <InteractiveDeviceChartAndUsers
-            currentUser={currentUser}
-            usersList={usersList}
-            devices={devices}
-            activeDeviceId={activeTelemetryDeviceId || devices[0]?.id}
-            onSelectDevice={(id) => onSelectTelemetryDevice?.(id)}
-            onSelectUser={() => isSuperOrAdmin ? onNavigateTab('usuarios') : (onChangeUserModal ? onChangeUserModal() : undefined)}
-            onChangeUserModal={onChangeUserModal}
-            activeAlertCount={activeAlerts.length}
-          />
-        </div>
+        {(appCfg?.showChartsAndUsers ?? true) && (
+          <div className="relative z-10 mb-10">
+            <InteractiveDeviceChartAndUsers
+              currentUser={currentUser}
+              usersList={usersList}
+              devices={devices}
+              activeDeviceId={activeTelemetryDeviceId || devices[0]?.id}
+              onSelectDevice={(id) => onSelectTelemetryDevice?.(id)}
+              onSelectUser={() => canSeeUsuarios ? safeNavigate('usuarios') : (onChangeUserModal ? onChangeUserModal() : undefined)}
+              onChangeUserModal={onChangeUserModal}
+              activeAlertCount={activeAlerts.length}
+              platformConfig={platformConfig}
+            />
+          </div>
+        )}
 
         {/* ==============================================================
             SECCIÓN DE ESTADO DEL GATEWAY (ESP32 Central de Enlace) - Req 2 & 1
            ============================================================== */}
-        <ESP32GatewaySection
-          devices={devices}
-          activeDeviceId={activeTelemetryDeviceId || devices[0]?.id}
-          onSelectDevice={(id) => onSelectTelemetryDevice?.(id)}
-          onResetPageLevels={onResetPageLevels}
-          isAlarmActive={isAlarmActive}
-          onToggleAlarm={onToggleAlarm}
-          isLightActive={isLightActive}
-          onToggleLight={onToggleLight}
-        />
+        {(appCfg?.showESP32Section ?? true) && (
+          <ESP32GatewaySection
+            devices={devices}
+            activeDeviceId={activeTelemetryDeviceId || devices[0]?.id}
+            onSelectDevice={(id) => onSelectTelemetryDevice?.(id)}
+            onResetPageLevels={onResetPageLevels}
+            isAlarmActive={isAlarmActive}
+            onToggleAlarm={onToggleAlarm}
+            isLightActive={isLightActive}
+            onToggleLight={onToggleLight}
+          />
+        )}
 
         {/* ==============================================================
             VISUALIZACIÓN AMIGABLE VS. MEDICIÓN TÉCNICA (Sensores) - Req 3
            ============================================================== */}
-        {activeDevice && (
+        {(appCfg?.showDualSensorCards ?? true) && activeDevice && (
           <DualReadingSensorCards device={activeDevice} />
         )}
 
         {/* ==============================================================
             THE 6 PRIMARY METRIC CARDS (Exact styling inspired by reference image)
            ============================================================== */}
+        {(appCfg?.showHeroMetricCards ?? true) && (
         <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           
           {/* Card 1: TEMPERATURA AMBIENTE */}
@@ -388,6 +412,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
         </div>
+        )}
       </section>
 
       {/* ==============================================================
@@ -408,13 +433,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={() => onNavigateTab('alertas')}
-            className="flex items-center gap-1.5 text-xs font-medium text-cyan-400 hover:text-cyan-300 transition-colors"
-          >
-            <span>Ver panel completo</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
+          {canSeeAlertas && (
+            <button
+              onClick={() => safeNavigate('alertas')}
+              className="flex items-center gap-1.5 text-xs font-medium text-cyan-400 hover:text-cyan-300 transition-colors"
+            >
+              <span>Ver panel completo</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         {activeAlerts.length === 0 ? (
@@ -474,6 +501,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* ==============================================================
           THE 12 KEY CAPABILITIES GRID (Directly inspired by reference image)
          ============================================================== */}
+      {(appCfg?.showCapabilitiesGrid ?? true) && (
       <section className="space-y-4">
         <div className="text-center max-w-2xl mx-auto mb-8">
           <span className="text-xs uppercase font-bold tracking-widest text-cyan-400">
@@ -491,8 +519,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           
           {/* Card 1: Monitoreo en Tiempo Real */}
           <div 
-            onClick={() => onNavigateTab('monitoreo')}
-            className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-cyan-900/30 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm hover:shadow-cyan-950"
+            onClick={() => canSeeMonitoreo && safeNavigate('monitoreo')}
+            className={`group p-4 rounded-xl bg-slate-900/60 border border-cyan-900/30 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm hover:shadow-cyan-950 ${canSeeMonitoreo ? 'cursor-pointer' : 'opacity-75'}`}
           >
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-cyan-950/80 border border-cyan-700/60 flex items-center justify-center text-cyan-400 group-hover:scale-105 transition-transform">
@@ -509,8 +537,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Card 2: Alertas Instantáneas */}
           <div 
-            onClick={() => onNavigateTab('alertas')}
-            className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-amber-900/30 hover:border-amber-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
+            onClick={() => canSeeAlertas && safeNavigate('alertas')}
+            className={`group p-4 rounded-xl bg-slate-900/60 border border-amber-900/30 hover:border-amber-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm ${canSeeAlertas ? 'cursor-pointer' : 'opacity-75'}`}
           >
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-amber-950/80 border border-amber-700/60 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-transform">
@@ -527,8 +555,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Card 3: Análisis Predictivo */}
           <div 
-            onClick={() => onNavigateTab('reportes')}
-            className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-blue-900/30 hover:border-blue-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
+            onClick={() => canSeeReportes && safeNavigate('reportes')}
+            className={`group p-4 rounded-xl bg-slate-900/60 border border-blue-900/30 hover:border-blue-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm ${canSeeReportes ? 'cursor-pointer' : 'opacity-75'}`}
           >
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-blue-950/80 border border-blue-700/60 flex items-center justify-center text-blue-400 group-hover:scale-105 transition-transform">
@@ -545,8 +573,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Card 4: Eficiencia Energética */}
           <div 
-            onClick={() => onNavigateTab('monitoreo')}
-            className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-emerald-900/30 hover:border-emerald-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
+            onClick={() => canSeeMonitoreo && safeNavigate('monitoreo')}
+            className={`group p-4 rounded-xl bg-slate-900/60 border border-emerald-900/30 hover:border-emerald-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm ${canSeeMonitoreo ? 'cursor-pointer' : 'opacity-75'}`}
           >
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-emerald-950/80 border border-emerald-700/60 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform">
@@ -563,8 +591,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Card 5: Automatización Inteligente */}
           <div 
-            onClick={() => onNavigateTab('monitoreo')}
-            className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
+            onClick={() => canSeeMonitoreo && safeNavigate('monitoreo')}
+            className={`group p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm ${canSeeMonitoreo ? 'cursor-pointer' : 'opacity-75'}`}
           >
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-cyan-300 group-hover:scale-105 transition-transform">
@@ -581,8 +609,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Card 6: Seguridad Avanzada */}
           <div 
-            onClick={() => onNavigateTab('faenas')}
-            className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
+            onClick={() => canSeeFaenas && safeNavigate('faenas')}
+            className={`group p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm ${canSeeFaenas ? 'cursor-pointer' : 'opacity-75'}`}
           >
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-cyan-300 group-hover:scale-105 transition-transform">
@@ -599,8 +627,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Card 7: Informes Personalizados */}
           <div 
-            onClick={() => onNavigateTab('reportes')}
-            className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
+            onClick={() => canSeeReportes && safeNavigate('reportes')}
+            className={`group p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm ${canSeeReportes ? 'cursor-pointer' : 'opacity-75'}`}
           >
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-cyan-300 group-hover:scale-105 transition-transform">
@@ -615,10 +643,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </p>
           </div>
 
-          {/* Card 8: Gestión de Dispositivos y Arriendos (Solo Admin) / Protocolos de Seguridad (Operador) */}
-          {isSuperOrAdmin ? (
+          {/* Card 8: Gestión de Dispositivos y Arriendos (si está visible) / Protocolos de Seguridad */}
+          {canSeeEquipos ? (
             <div 
-              onClick={() => onNavigateTab('equipos')}
+              onClick={() => safeNavigate('equipos')}
               className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-amber-900/30 hover:border-amber-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
             >
               <div className="flex items-center gap-3 mb-3">
@@ -635,8 +663,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           ) : (
             <div 
-              onClick={() => onNavigateTab('alertas')}
-              className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
+              onClick={() => canSeeAlertas && safeNavigate('alertas')}
+              className={`group p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm ${canSeeAlertas ? 'cursor-pointer' : 'opacity-75'}`}
             >
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-cyan-300 group-hover:scale-105 transition-transform">
@@ -654,7 +682,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Card 9: Facilidad de Integración IoT */}
           <div 
-            onClick={() => onNavigateTab(isSuperOrAdmin ? 'equipos' : 'monitoreo')}
+            onClick={() => (canSeeEquipos ? safeNavigate('equipos') : canSeeMonitoreo && safeNavigate('monitoreo'))}
             className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
           >
             <div className="flex items-center gap-3 mb-3">
@@ -672,7 +700,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Card 10: Mantenimiento Preventivo */}
           <div 
-            onClick={() => onNavigateTab(isSuperOrAdmin ? 'equipos' : 'monitoreo')}
+            onClick={() => (canSeeEquipos ? safeNavigate('equipos') : canSeeMonitoreo && safeNavigate('monitoreo'))}
             className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
           >
             <div className="flex items-center gap-3 mb-3">
@@ -690,7 +718,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Card 11: Asignación a Trabajadores */}
           <div 
-            onClick={() => onNavigateTab(isSuperOrAdmin ? 'equipos' : 'monitoreo')}
+            onClick={() => (canSeeEquipos ? safeNavigate('equipos') : canSeeMonitoreo && safeNavigate('monitoreo'))}
             className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
           >
             <div className="flex items-center gap-3 mb-3">
@@ -708,8 +736,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Card 12: Sostenibilidad Ambiental */}
           <div 
-            onClick={() => onNavigateTab('reportes')}
-            className="group cursor-pointer p-4 rounded-xl bg-slate-900/60 border border-emerald-900/30 hover:border-emerald-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm"
+            onClick={() => canSeeReportes && safeNavigate('reportes')}
+            className={`group p-4 rounded-xl bg-slate-900/60 border border-emerald-900/30 hover:border-emerald-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm ${canSeeReportes ? 'cursor-pointer' : 'opacity-75'}`}
           >
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-emerald-950/80 border border-emerald-700/60 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform">
@@ -726,10 +754,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         </div>
       </section>
+      )}
 
       {/* ==============================================================
           ADDITIONAL GASES & CRITICAL METRICS ROW
          ============================================================== */}
+      {(appCfg?.showAdditionalGasesRow ?? true) && (
       <section className="bg-slate-900/40 border border-slate-800 rounded-xl p-5">
         <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2">
           <Flame className="w-4 h-4 text-orange-400" />
@@ -738,26 +768,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="p-3 bg-slate-950/50 rounded-lg border border-slate-800">
             <span className="text-[11px] text-slate-400 block">Metano (CH4)</span>
-            <span className="text-xl font-bold text-white tabular-nums">1.2% LEL</span>
-            <span className="text-[10px] text-emerald-400 block mt-0.5">Seguro (&lt; 5.0%)</span>
+            <span className="text-xl font-bold text-white tabular-nums">{activeDevice?.metrics?.ch4 ?? 1.2}% LEL</span>
+            <span className="text-[10px] text-emerald-400 block mt-0.5">Seguro (&lt; {metCfg?.ch4SafeMax ?? 1.5}%)</span>
           </div>
           <div className="p-3 bg-slate-950/50 rounded-lg border border-slate-800">
             <span className="text-[11px] text-slate-400 block">Monóxido (CO)</span>
-            <span className="text-xl font-bold text-white tabular-nums">9.4 ppm</span>
-            <span className="text-[10px] text-emerald-400 block mt-0.5">Bajo (&lt; 25 ppm)</span>
+            <span className="text-xl font-bold text-white tabular-nums">{activeDevice?.rawCO ?? activeDevice?.metrics?.co ?? 9.4} ppm</span>
+            <span className="text-[10px] text-emerald-400 block mt-0.5">Límite (&lt; {metCfg?.coChartSafeMax ?? 50} ppm)</span>
           </div>
           <div className="p-3 bg-slate-950/50 rounded-lg border border-slate-800">
             <span className="text-[11px] text-slate-400 block">Polvo (PM2.5)</span>
-            <span className="text-xl font-bold text-white tabular-nums">24 µg/m³</span>
-            <span className="text-[10px] text-emerald-400 block mt-0.5">Norma cumplida</span>
+            <span className="text-xl font-bold text-white tabular-nums">{activeDevice?.rawPM25 ?? activeDevice?.metrics?.polvoPM ?? 24} µg/m³</span>
+            <span className="text-[10px] text-emerald-400 block mt-0.5">Límite (&lt; {metCfg?.pm25ChartSafeMax ?? 50} µg/m³)</span>
           </div>
           <div className="p-3 bg-slate-950/50 rounded-lg border border-slate-800">
             <span className="text-[11px] text-slate-400 block">Presión Acústica</span>
-            <span className="text-xl font-bold text-white tabular-nums">72 dB</span>
-            <span className="text-[10px] text-emerald-400 block mt-0.5">Protección auditiva OK</span>
+            <span className="text-xl font-bold text-white tabular-nums">{activeDevice?.metrics?.ruido ?? 72} dB</span>
+            <span className="text-[10px] text-emerald-400 block mt-0.5">Límite (&lt; {metCfg?.noiseSafeMax ?? 82} dB)</span>
           </div>
         </div>
       </section>
+      )}
 
     </div>
   );

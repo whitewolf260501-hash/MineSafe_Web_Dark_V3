@@ -27,7 +27,7 @@ import {
   Gauge,
   ShieldCheck
 } from 'lucide-react';
-import { SensorDevice, UserProfile, UserRole } from '../types';
+import { PlatformConfig, SensorDevice, UserProfile, UserRole } from '../types';
 
 interface InteractiveDeviceChartAndUsersProps {
   currentUser?: UserProfile | null;
@@ -38,6 +38,7 @@ interface InteractiveDeviceChartAndUsersProps {
   onSelectUser?: (user: UserProfile) => void;
   onChangeUserModal?: () => void;
   activeAlertCount?: number;
+  platformConfig?: PlatformConfig;
 }
 
 export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndUsersProps> = ({
@@ -49,6 +50,7 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
   onSelectUser,
   onChangeUserModal,
   activeAlertCount = 0,
+  platformConfig,
 }) => {
   const [userSearchTerm, setUserSearchTerm] = useState('');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<'todos' | UserRole>('todos');
@@ -129,6 +131,23 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
   const o2Value = currentDevice?.metrics?.o2 ?? 20.8;
   const batteryPct = currentDevice?.batteryPct ?? 90;
 
+  const pm = platformConfig?.metrics;
+  const tempSafe = pm?.tempPreventivo ?? 28;
+  const tempCrit = pm?.tempCritico ?? 32;
+  const humSafe = pm?.humPreventivo ?? 70;
+  const humCrit = pm?.humCritico ?? 85;
+  const coSafe = pm?.coChartSafeMax ?? 50;
+  const co2Safe = pm?.co2SafeMax ?? 1000;
+  const co2Crit = pm?.co2CriticalMax ?? 2000;
+  const pm25Safe = pm?.pm25ChartSafeMax ?? 50;
+  const ch4Safe = pm?.ch4SafeMax ?? 1.5;
+  const ch4Crit = pm?.ch4CriticalMax ?? 5.0;
+  const airMin = pm?.airFlowMin ?? 0.5;
+  const airMax = pm?.airFlowMax ?? 3.0;
+  const noiseSafe = pm?.noiseSafeMax ?? 82;
+  const noiseCrit = pm?.noiseCriticalMax ?? 90;
+  const o2Min = pm?.o2MinSafe ?? 19.5;
+
   // Complete list of ALL 9 sensors with precise units, limits, and color themes
   const allSensorBars = [
     {
@@ -137,16 +156,16 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
       shortName: 'Temp',
       unit: '°C',
       value: Number(tempValue.toFixed(1)),
-      safeMax: 28,
-      criticalMax: 32,
-      scaleMax: 40,
+      safeMax: tempSafe,
+      criticalMax: tempCrit,
+      scaleMax: Math.max(40, tempCrit + 5),
       icon: <Thermometer className="w-4 h-4 text-cyan-400" />,
       gradient: 'from-cyan-500 to-blue-600',
       glowColor: 'shadow-cyan-500/30',
-      badgeColor: tempValue > 30 ? 'bg-rose-950 text-rose-300 border-rose-800' : tempValue > 28 ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-cyan-950 text-cyan-300 border-cyan-800',
-      textColor: tempValue > 30 ? 'text-rose-400' : tempValue > 28 ? 'text-amber-400' : 'text-cyan-400',
-      status: tempValue > 30 ? 'Calor' : tempValue > 28 ? 'Alerta' : 'Óptimo',
-      norm: 'DS 132: 18° - 28°C'
+      badgeColor: tempValue > tempCrit ? 'bg-rose-950 text-rose-300 border-rose-800' : tempValue > tempSafe ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-cyan-950 text-cyan-300 border-cyan-800',
+      textColor: tempValue > tempCrit ? 'text-rose-400' : tempValue > tempSafe ? 'text-amber-400' : 'text-cyan-400',
+      status: tempValue > tempCrit ? 'Calor' : tempValue > tempSafe ? 'Alerta' : 'Óptimo',
+      norm: `DS 132: ${pm?.tempMin ?? 18}° - ${tempSafe}°C`
     },
     {
       id: 'hum',
@@ -154,16 +173,16 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
       shortName: 'Humedad',
       unit: '%',
       value: Number(humValue.toFixed(1)),
-      safeMax: 70,
-      criticalMax: 85,
+      safeMax: humSafe,
+      criticalMax: humCrit,
       scaleMax: 100,
       icon: <Droplets className="w-4 h-4 text-blue-400" />,
       gradient: 'from-blue-500 to-indigo-600',
       glowColor: 'shadow-blue-500/30',
-      badgeColor: humValue > 85 ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-blue-950 text-blue-300 border-blue-800',
-      textColor: humValue > 85 ? 'text-amber-400' : 'text-blue-400',
-      status: humValue > 85 ? 'Elevada' : 'Normal',
-      norm: 'DS 132: 40% - 70%'
+      badgeColor: humValue > humCrit ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-blue-950 text-blue-300 border-blue-800',
+      textColor: humValue > humCrit ? 'text-amber-400' : 'text-blue-400',
+      status: humValue > humCrit ? 'Elevada' : 'Normal',
+      norm: `DS 132: ${pm?.humMin ?? 40}% - ${humSafe}%`
     },
     {
       id: 'co',
@@ -171,16 +190,16 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
       shortName: 'CO (MQ2)',
       unit: 'ppm',
       value: Number(coValue.toFixed(1)),
-      safeMax: 50,
-      criticalMax: 100,
-      scaleMax: 100,
+      safeMax: coSafe,
+      criticalMax: coSafe * 2,
+      scaleMax: Math.max(100, coSafe * 2),
       icon: <Flame className="w-4 h-4 text-orange-400" />,
-      gradient: coValue > 50 ? 'from-rose-600 to-red-500' : coValue > 25 ? 'from-amber-500 to-orange-500' : 'from-emerald-500 to-teal-500',
-      glowColor: coValue > 50 ? 'shadow-rose-500/40' : 'shadow-orange-500/30',
-      badgeColor: coValue > 50 ? 'bg-rose-950 text-rose-300 border-rose-800 animate-pulse' : coValue > 25 ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-emerald-950 text-emerald-300 border-emerald-800',
-      textColor: coValue > 50 ? 'text-rose-400' : coValue > 25 ? 'text-amber-400' : 'text-emerald-400',
-      status: coValue > 50 ? 'Peligro' : coValue > 25 ? 'Alerta' : 'Seguro',
-      norm: 'DS 132: LPP ≤ 50 ppm'
+      gradient: coValue > coSafe ? 'from-rose-600 to-red-500' : coValue > coSafe * 0.5 ? 'from-amber-500 to-orange-500' : 'from-emerald-500 to-teal-500',
+      glowColor: coValue > coSafe ? 'shadow-rose-500/40' : 'shadow-orange-500/30',
+      badgeColor: coValue > coSafe ? 'bg-rose-950 text-rose-300 border-rose-800 animate-pulse' : coValue > coSafe * 0.5 ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-emerald-950 text-emerald-300 border-emerald-800',
+      textColor: coValue > coSafe ? 'text-rose-400' : coValue > coSafe * 0.5 ? 'text-amber-400' : 'text-emerald-400',
+      status: coValue > coSafe ? 'Peligro' : coValue > coSafe * 0.5 ? 'Alerta' : 'Seguro',
+      norm: `DS 132: LPP ≤ ${coSafe} ppm`
     },
     {
       id: 'co2',
@@ -188,16 +207,16 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
       shortName: 'CO2',
       unit: 'ppm',
       value: co2Value,
-      safeMax: 1000,
-      criticalMax: 2000,
-      scaleMax: 2000,
+      safeMax: co2Safe,
+      criticalMax: co2Crit,
+      scaleMax: Math.max(2000, co2Crit),
       icon: <Wind className="w-4 h-4 text-emerald-400" />,
-      gradient: co2Value > 1500 ? 'from-rose-500 to-red-600' : co2Value > 1000 ? 'from-amber-500 to-yellow-600' : 'from-emerald-500 to-green-600',
+      gradient: co2Value > co2Crit * 0.75 ? 'from-rose-500 to-red-600' : co2Value > co2Safe ? 'from-amber-500 to-yellow-600' : 'from-emerald-500 to-green-600',
       glowColor: 'shadow-emerald-500/30',
-      badgeColor: co2Value > 1500 ? 'bg-rose-950 text-rose-300 border-rose-800' : co2Value > 1000 ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-emerald-950 text-emerald-300 border-emerald-800',
-      textColor: co2Value > 1500 ? 'text-rose-400' : co2Value > 1000 ? 'text-amber-400' : 'text-emerald-400',
-      status: co2Value > 1500 ? 'Ventilar' : co2Value > 1000 ? 'Atención' : 'Seguro',
-      norm: 'DS 132: LPP ≤ 1000 ppm'
+      badgeColor: co2Value > co2Crit * 0.75 ? 'bg-rose-950 text-rose-300 border-rose-800' : co2Value > co2Safe ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-emerald-950 text-emerald-300 border-emerald-800',
+      textColor: co2Value > co2Crit * 0.75 ? 'text-rose-400' : co2Value > co2Safe ? 'text-amber-400' : 'text-emerald-400',
+      status: co2Value > co2Crit * 0.75 ? 'Ventilar' : co2Value > co2Safe ? 'Atención' : 'Seguro',
+      norm: `DS 132: LPP ≤ ${co2Safe} ppm`
     },
     {
       id: 'pm25',
@@ -205,16 +224,16 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
       shortName: 'PM2.5',
       unit: 'µg/m³',
       value: Number(pm25Value.toFixed(1)),
-      safeMax: 50,
-      criticalMax: 150,
-      scaleMax: 150,
+      safeMax: pm25Safe,
+      criticalMax: pm25Safe * 3,
+      scaleMax: Math.max(150, pm25Safe * 3),
       icon: <Layers className="w-4 h-4 text-amber-300" />,
-      gradient: pm25Value > 150 ? 'from-rose-500 to-red-600' : pm25Value > 50 ? 'from-amber-500 to-yellow-500' : 'from-cyan-500 to-teal-500',
+      gradient: pm25Value > pm25Safe * 3 ? 'from-rose-500 to-red-600' : pm25Value > pm25Safe ? 'from-amber-500 to-yellow-500' : 'from-cyan-500 to-teal-500',
       glowColor: 'shadow-amber-500/30',
-      badgeColor: pm25Value > 150 ? 'bg-rose-950 text-rose-300 border-rose-800 animate-pulse' : pm25Value > 50 ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-cyan-950 text-cyan-300 border-cyan-800',
-      textColor: pm25Value > 150 ? 'text-rose-400' : pm25Value > 50 ? 'text-amber-400' : 'text-cyan-400',
-      status: pm25Value > 150 ? 'Crítico' : pm25Value > 50 ? 'Moderado' : 'Óptimo',
-      norm: 'DS 132: LPP ≤ 50 µg/m³'
+      badgeColor: pm25Value > pm25Safe * 3 ? 'bg-rose-950 text-rose-300 border-rose-800 animate-pulse' : pm25Value > pm25Safe ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-cyan-950 text-cyan-300 border-cyan-800',
+      textColor: pm25Value > pm25Safe * 3 ? 'text-rose-400' : pm25Value > pm25Safe ? 'text-amber-400' : 'text-cyan-400',
+      status: pm25Value > pm25Safe * 3 ? 'Crítico' : pm25Value > pm25Safe ? 'Moderado' : 'Óptimo',
+      norm: `DS 132: LPP ≤ ${pm25Safe} µg/m³`
     },
     {
       id: 'ch4',
@@ -222,16 +241,16 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
       shortName: 'CH4',
       unit: '% LEL',
       value: Number(ch4Value.toFixed(1)),
-      safeMax: 1.5,
-      criticalMax: 5.0,
-      scaleMax: 5.0,
+      safeMax: ch4Safe,
+      criticalMax: ch4Crit,
+      scaleMax: Math.max(5.0, ch4Crit),
       icon: <Zap className="w-4 h-4 text-purple-400" />,
-      gradient: ch4Value > 1.5 ? 'from-rose-600 to-red-600' : 'from-purple-500 to-pink-500',
+      gradient: ch4Value > ch4Safe ? 'from-rose-600 to-red-600' : 'from-purple-500 to-pink-500',
       glowColor: 'shadow-purple-500/30',
-      badgeColor: ch4Value > 1.5 ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-purple-950 text-purple-300 border-purple-800',
-      textColor: ch4Value > 1.5 ? 'text-rose-400' : 'text-purple-400',
-      status: ch4Value > 1.5 ? 'Crítico' : 'Seguro',
-      norm: 'DS 132: Máx 1.5% LEL'
+      badgeColor: ch4Value > ch4Safe ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-purple-950 text-purple-300 border-purple-800',
+      textColor: ch4Value > ch4Safe ? 'text-rose-400' : 'text-purple-400',
+      status: ch4Value > ch4Safe ? 'Crítico' : 'Seguro',
+      norm: `DS 132: Máx ${ch4Safe}% LEL`
     },
     {
       id: 'airFlow',
@@ -239,16 +258,16 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
       shortName: 'Ventilación',
       unit: 'm/s',
       value: Number(airFlowValue.toFixed(2)),
-      safeMax: 2.5,
-      criticalMax: 0.5,
-      scaleMax: 3.0,
+      safeMax: airMax,
+      criticalMax: airMin,
+      scaleMax: Math.max(3.0, airMax),
       icon: <Wind className="w-4 h-4 text-teal-400" />,
-      gradient: airFlowValue < 0.5 ? 'from-rose-600 to-red-500' : 'from-teal-500 to-emerald-500',
+      gradient: airFlowValue < airMin ? 'from-rose-600 to-red-500' : 'from-teal-500 to-emerald-500',
       glowColor: 'shadow-teal-500/30',
-      badgeColor: airFlowValue < 0.5 ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-teal-950 text-teal-300 border-teal-800',
-      textColor: airFlowValue < 0.5 ? 'text-rose-400' : 'text-teal-400',
-      status: airFlowValue < 0.5 ? 'Bajo' : 'Óptimo',
-      norm: 'DS 132: Mínimo 0.5 m/s'
+      badgeColor: airFlowValue < airMin ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-teal-950 text-teal-300 border-teal-800',
+      textColor: airFlowValue < airMin ? 'text-rose-400' : 'text-teal-400',
+      status: airFlowValue < airMin ? 'Bajo' : 'Óptimo',
+      norm: `DS 132: Mínimo ${airMin} m/s`
     },
     {
       id: 'noise',
@@ -256,16 +275,16 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
       shortName: 'Ruido',
       unit: 'dB',
       value: Number(noiseValue.toFixed(0)),
-      safeMax: 82,
-      criticalMax: 90,
-      scaleMax: 110,
+      safeMax: noiseSafe,
+      criticalMax: noiseCrit,
+      scaleMax: Math.max(110, noiseCrit + 15),
       icon: <Volume2 className="w-4 h-4 text-rose-400" />,
-      gradient: noiseValue > 85 ? 'from-rose-600 to-red-600' : 'from-rose-500 to-amber-500',
+      gradient: noiseValue > noiseSafe ? 'from-rose-600 to-red-600' : 'from-rose-500 to-amber-500',
       glowColor: 'shadow-rose-500/30',
-      badgeColor: noiseValue > 85 ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-slate-900 text-slate-300 border-slate-700',
-      textColor: noiseValue > 85 ? 'text-rose-400' : 'text-slate-300',
-      status: noiseValue > 85 ? 'Elevado' : 'Aceptable',
-      norm: 'DS 132: LPP ≤ 82 dB(A)'
+      badgeColor: noiseValue > noiseSafe ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-slate-900 text-slate-300 border-slate-700',
+      textColor: noiseValue > noiseSafe ? 'text-rose-400' : 'text-slate-300',
+      status: noiseValue > noiseSafe ? 'Elevado' : 'Aceptable',
+      norm: `DS 132: LPP ≤ ${noiseSafe} dB(A)`
     },
     {
       id: 'o2',
@@ -274,15 +293,15 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
       unit: '%',
       value: Number(o2Value.toFixed(1)),
       safeMax: 21.0,
-      criticalMax: 19.5,
+      criticalMax: o2Min,
       scaleMax: 25.0,
       icon: <Activity className="w-4 h-4 text-emerald-400" />,
-      gradient: o2Value < 19.5 ? 'from-rose-600 to-red-600' : 'from-emerald-400 to-teal-500',
+      gradient: o2Value < o2Min ? 'from-rose-600 to-red-600' : 'from-emerald-400 to-teal-500',
       glowColor: 'shadow-emerald-500/30',
-      badgeColor: o2Value < 19.5 ? 'bg-rose-950 text-rose-300 border-rose-800 animate-pulse' : 'bg-emerald-950 text-emerald-300 border-emerald-800',
-      textColor: o2Value < 19.5 ? 'text-rose-400' : 'text-emerald-400',
-      status: o2Value < 19.5 ? 'Deficiente' : 'Normal',
-      norm: 'DS 132: Mínimo 19.5% O2'
+      badgeColor: o2Value < o2Min ? 'bg-rose-950 text-rose-300 border-rose-800 animate-pulse' : 'bg-emerald-950 text-emerald-300 border-emerald-800',
+      textColor: o2Value < o2Min ? 'text-rose-400' : 'text-emerald-400',
+      status: o2Value < o2Min ? 'Deficiente' : 'Normal',
+      norm: `DS 132: Mínimo ${o2Min}% O2`
     }
   ];
 

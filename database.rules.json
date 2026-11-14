@@ -72,6 +72,13 @@
         ".write": true,
         ".validate": "newData.hasChildren(['dispositivo_id', 'variable', 'valor_detectado', 'umbral_superado', 'nivel'])"
       }
+    },
+    "configuracion_plataforma": {
+      // Todos los clientes leen reglas de visibilidad y métricas globales en tiempo real;
+      // solo el SuperAdmin (o escritura firmada desde consola SuperAdmin) modifica este nodo
+      ".read": true,
+      ".write": "auth != null ? (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin') : newData.hasChildren(['visibility', 'metrics', 'appearance', 'actualizado_en'])",
+      ".validate": "newData.hasChildren(['visibility', 'metrics', 'appearance'])"
     }
   }
 }
