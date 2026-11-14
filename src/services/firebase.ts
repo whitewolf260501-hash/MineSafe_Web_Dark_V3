@@ -22,6 +22,9 @@ import {
   setPersistence,
   browserLocalPersistence,
   browserSessionPersistence,
+  GoogleAuthProvider,
+  signInWithPopup,
+  updateProfile,
   User as FirebaseUser
 } from 'firebase/auth';
 
@@ -197,28 +200,51 @@ export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevic
 
 export const PRIMARY_SUPERADMIN_EMAIL = 'manuelcrisostomovega@gmail.com';
 export const PRIMARY_SUPERADMIN_UID = 'manual_temp_uid_01';
+export const FIREBASE_PROJECT_ID = firebaseConfig.projectId;
 
-function mapFirebaseAuthError(err: any): string {
+export class FirebaseAuthActionError extends Error {
+  code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+function mapFirebaseAuthError(err: any): FirebaseAuthActionError {
   const code = err?.code || '';
   switch (code) {
     case 'auth/invalid-credential':
     case 'auth/wrong-password':
     case 'auth/user-not-found':
-      return 'Correo o contraseña incorrectos en Firebase Authentication. Acceso denegado.';
+      return new FirebaseAuthActionError('Correo o contraseña incorrectos en Firebase Authentication. Acceso denegado.', code);
     case 'auth/invalid-email':
-      return 'El formato del correo electrónico no es válido.';
+      return new FirebaseAuthActionError('El formato del correo electrónico no es válido.', code);
     case 'auth/user-disabled':
-      return 'Esta cuenta ha sido deshabilitada en Firebase Authentication.';
+      return new FirebaseAuthActionError('Esta cuenta ha sido deshabilitada en Firebase Authentication.', code);
     case 'auth/too-many-requests':
-      return 'Demasiados intentos fallidos. Espera unos minutos antes de volver a intentar.';
+      return new FirebaseAuthActionError('Demasiados intentos fallidos. Espera unos minutos antes de volver a intentar.', code);
     case 'auth/email-already-in-use':
-      return 'Este correo electrónico ya está registrado en Firebase Authentication.';
+      return new FirebaseAuthActionError('Este correo electrónico ya está registrado en Firebase Authentication.', code);
     case 'auth/weak-password':
-      return 'La contraseña debe tener al menos 6 caracteres.';
+      return new FirebaseAuthActionError('La contraseña debe tener al menos 6 caracteres.', code);
+    case 'auth/operation-not-allowed':
+      return new FirebaseAuthActionError(
+        `El proveedor "Correo electrónico/contraseña" está desactivado en Firebase Console (proyecto ${FIREBASE_PROJECT_ID}). Actívalo en Authentication → Sign-in method para poder crear cuentas con correo y clave.`,
+        code
+      );
+    case 'auth/unauthorized-domain':
+      return new FirebaseAuthActionError(
+        `El dominio actual (${typeof window !== 'undefined' ? window.location.hostname : 'actual'}) no está autorizado en Firebase Console (${FIREBASE_PROJECT_ID} → Authentication → Settings → Dominios autorizados).`,
+        code
+      );
+    case 'auth/popup-closed-by-user':
+      return new FirebaseAuthActionError('Se cerró la ventana emergente de Google antes de completar el acceso.', code);
+    case 'auth/popup-blocked':
+      return new FirebaseAuthActionError('El navegador bloqueó la ventana emergente de Google. Permite ventanas emergentes e intenta nuevamente.', code);
     case 'auth/network-request-failed':
-      return 'Error de red al conectar con Firebase Authentication. Verifica tu conexión a Internet.';
+      return new FirebaseAuthActionError('Error de red al conectar con Firebase Authentication. Verifica tu conexión a Internet.', code);
     default:
-      return err?.message || 'Error al autenticar con Firebase Authentication.';
+      return new FirebaseAuthActionError(err?.message || 'Error al autenticar con Firebase Authentication.', code || 'auth/unknown');
   }
 }
 
@@ -334,7 +360,40 @@ export async function loginWithFirebaseAuth(
     const credential = await signInWithEmailAndPassword(auth, cleanEmail, password);
     return await resolveUserProfileFromAuthUser(credential.user);
   } catch (err: any) {
-    throw new Error(mapFirebaseAuthError(err));
+    throw mapFirebaseAuthError(err);
+  }
+}
+
+export async function loginWithGoogleFirebaseAuth(rememberMe: boolean = true): Promise<UserProfile> {
+  try {
+    await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence).catch(() => {});
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const credential = await signInWithPopup(auth, provider);
+    const fbUser = credential.user;
+
+    // Registrar ficha básica en RTDB si es la primera vez que ingresa por Google
+    const byUidSnap = await get(ref(rtdb, `usuarios/${fbUser.uid}`)).catch(() => null);
+    const isCanonicalSuper = (fbUser.email || '').trim().toLowerCase() === PRIMARY_SUPERADMIN_EMAIL;
+    if (!byUidSnap || !byUidSnap.exists()) {
+      await set(ref(rtdb, `usuarios/${fbUser.uid}`), {
+        nombre: fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0] : 'Usuario'),
+        email: fbUser.email || '',
+        isAdmin: isCanonicalSuper,
+        isSuperUser: isCanonicalSuper,
+        tipoUsuario: isCanonicalSuper ? 'superadmin' : 'operador',
+        isActive: true,
+        telefono: 'No registrado',
+        cargo: 'Turno Continuo A',
+        geoMina: 'Faena Minera Central',
+        deviceId: '',
+        updatedAt: new Date().toISOString(),
+      }).catch(() => {});
+    }
+
+    return await resolveUserProfileFromAuthUser(fbUser);
+  } catch (err: any) {
+    throw mapFirebaseAuthError(err);
   }
 }
 
@@ -348,11 +407,12 @@ export async function registerWithFirebaseAuth(
   const cleanEmail = email.trim();
   const cleanName = name.trim();
   if (!cleanName || !cleanEmail || !password) {
-    throw new Error('Nombre, correo y contraseña (mínimo 6 caracteres) son obligatorios.');
+    throw new FirebaseAuthActionError('Nombre, correo y contraseña (mínimo 6 caracteres) son obligatorios.', 'auth/invalid-input');
   }
 
   try {
     const credential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+    await updateProfile(credential.user, { displayName: cleanName }).catch(() => {});
     const uid = credential.user.uid;
     const isCanonicalSuper = cleanEmail.toLowerCase() === PRIMARY_SUPERADMIN_EMAIL;
     const safeRole: UserRole = isCanonicalSuper ? 'superadmin' : 'operador';
@@ -389,19 +449,19 @@ export async function registerWithFirebaseAuth(
 
     return newUser;
   } catch (err: any) {
-    throw new Error(mapFirebaseAuthError(err));
+    throw mapFirebaseAuthError(err);
   }
 }
 
 export async function sendPasswordResetWithFirebase(email: string): Promise<void> {
   const cleanEmail = email.trim();
   if (!cleanEmail) {
-    throw new Error('Ingresa tu correo electrónico registrado.');
+    throw new FirebaseAuthActionError('Ingresa tu correo electrónico registrado.', 'auth/invalid-input');
   }
   try {
     await sendPasswordResetEmail(auth, cleanEmail);
   } catch (err: any) {
-    throw new Error(mapFirebaseAuthError(err));
+    throw mapFirebaseAuthError(err);
   }
 }
 

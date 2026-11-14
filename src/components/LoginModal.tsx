@@ -18,13 +18,16 @@ import {
   ShieldCheck,
   ShieldAlert,
   Fingerprint,
-  Loader2
+  Loader2,
+  ExternalLink
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { 
   loginWithFirebaseAuth,
+  loginWithGoogleFirebaseAuth,
   registerWithFirebaseAuth,
-  sendPasswordResetWithFirebase
+  sendPasswordResetWithFirebase,
+  FIREBASE_PROJECT_ID
 } from '../services/firebase';
 import { soundAlert } from '../services/audioAlert';
 
@@ -53,6 +56,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [errorCode, setErrorCode] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   
   // Security Controls
@@ -76,6 +80,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setEmail(targetUser.email);
     setPassword('');
     setErrorMessage('');
+    setErrorCode('');
     setSuccessMessage('');
     soundAlert.playFeedbackBeep();
 
@@ -88,6 +93,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const handleSubmitLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
+    setErrorCode('');
     setSuccessMessage('');
 
     const cleanEmail = email.trim();
@@ -111,7 +117,28 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       if (!isGateMode) onClose();
     } catch (err: any) {
       soundAlert.playFeedbackBeep();
+      setErrorCode(err?.code || '');
       setErrorMessage(err?.message || 'Credenciales inválidas en Firebase Authentication. Acceso denegado.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Sign in / Register with Google via Firebase Authentication
+  const handleGoogleAuth = async () => {
+    setErrorMessage('');
+    setErrorCode('');
+    setSuccessMessage('');
+    setIsSubmitting(true);
+    try {
+      const authenticatedUser = await loginWithGoogleFirebaseAuth(rememberMe);
+      soundAlert.playFeedbackBeep();
+      onLogin(authenticatedUser);
+      if (!isGateMode) onClose();
+    } catch (err: any) {
+      soundAlert.playFeedbackBeep();
+      setErrorCode(err?.code || '');
+      setErrorMessage(err?.message || 'No se pudo autenticar con Google en Firebase Auth.');
     } finally {
       setIsSubmitting(false);
     }
@@ -121,6 +148,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const handleSubmitRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
+    setErrorCode('');
     setSuccessMessage('');
 
     if (!regName.trim() || !regEmail.trim() || !regPassword) {
@@ -150,6 +178,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       }
     } catch (err: any) {
       soundAlert.playFeedbackBeep();
+      setErrorCode(err?.code || '');
       setErrorMessage(err?.message || 'No se pudo registrar la cuenta en Firebase Authentication.');
     } finally {
       setIsSubmitting(false);
@@ -160,6 +189,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const handleSubmitRecover = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
+    setErrorCode('');
     setSuccessMessage('');
     if (!email.trim()) {
       setErrorMessage('Ingrese su correo corporativo registrado en Firebase Auth.');
@@ -177,6 +207,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       }, 2500);
     } catch (err: any) {
       soundAlert.playFeedbackBeep();
+      setErrorCode(err?.code || '');
       setErrorMessage(err?.message || 'No se pudo enviar el correo de recuperación.');
     } finally {
       setIsSubmitting(false);
@@ -270,6 +301,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           onClick={() => {
             setActiveTab('login');
             setErrorMessage('');
+            setErrorCode('');
           }}
           className={`flex-1 py-1.5 font-semibold rounded-md transition-colors ${
             activeTab === 'login' ? 'bg-slate-800 text-cyan-300 shadow-sm' : 'text-slate-400 hover:text-slate-200'
@@ -281,6 +313,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           onClick={() => {
             setActiveTab('register');
             setErrorMessage('');
+            setErrorCode('');
           }}
           className={`flex-1 py-1.5 font-semibold rounded-md transition-colors ${
             activeTab === 'register' ? 'bg-slate-800 text-cyan-300 shadow-sm' : 'text-slate-400 hover:text-slate-200'
@@ -292,6 +325,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           onClick={() => {
             setActiveTab('recover');
             setErrorMessage('');
+            setErrorCode('');
           }}
           className={`flex-1 py-1.5 font-semibold rounded-md transition-colors ${
             activeTab === 'recover' ? 'bg-slate-800 text-cyan-300 shadow-sm' : 'text-slate-400 hover:text-slate-200'
@@ -303,9 +337,30 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
       {/* Feedback messages */}
       {errorMessage && (
-        <div className="p-3 bg-rose-950/80 border border-rose-800 text-rose-300 rounded-lg text-xs flex items-center gap-2 animate-in fade-in">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          <span>{errorMessage}</span>
+        <div className="p-3 bg-rose-950/80 border border-rose-800 text-rose-200 rounded-lg text-xs space-y-2 animate-in fade-in">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+            <span>{errorMessage}</span>
+          </div>
+          {errorCode === 'auth/operation-not-allowed' && (
+            <div className="p-2.5 rounded bg-slate-950/90 border border-amber-700/60 text-[11px] text-amber-200 space-y-1.5">
+              <p className="font-bold text-amber-300">Cómo activarlo en 10 segundos:</p>
+              <ol className="list-decimal list-inside space-y-0.5 text-slate-300">
+                <li>Abre Firebase Console → <strong>Authentication → Sign-in method</strong>.</li>
+                <li>Haz clic en <strong>Agregar nuevo proveedor → Correo electrónico/contraseña</strong> y actívalo.</li>
+                <li>Guarda los cambios y vuelve a intentar crear la cuenta.</li>
+              </ol>
+              <a
+                href={`https://console.firebase.google.com/project/${FIREBASE_PROJECT_ID}/authentication/providers`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-cyan-300 hover:text-cyan-200 underline font-semibold pt-0.5"
+              >
+                <span>Abrir Authentication en Firebase Console ({FIREBASE_PROJECT_ID})</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          )}
         </div>
       )}
 
@@ -524,6 +579,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </button>
           </form>
 
+          <button
+            type="button"
+            disabled={isSubmitting}
+            onClick={handleGoogleAuth}
+            className="w-full py-2.5 px-4 text-xs font-bold bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white border border-slate-700 rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span>Continuar con Google (Firebase Auth)</span>
+          </button>
+
         </div>
       )}
 
@@ -632,6 +697,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           >
             {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
             <span>{isSubmitting ? 'Registrando en Firebase Auth...' : 'Crear Cuenta en Firebase Auth'}</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={isSubmitting}
+            onClick={handleGoogleAuth}
+            className="w-full py-2.5 px-3 text-xs font-bold bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white border border-slate-700 rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span>Crear / Ingresar con Google (Firebase Auth)</span>
           </button>
         </form>
       )}
