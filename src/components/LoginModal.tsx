@@ -24,7 +24,6 @@ import {
 import { UserProfile } from '../types';
 import { 
   loginWithFirebaseAuth,
-  loginWithGoogleFirebaseAuth,
   registerWithFirebaseAuth,
   sendPasswordResetWithFirebase,
   FIREBASE_PROJECT_ID
@@ -119,26 +118,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       soundAlert.playFeedbackBeep();
       setErrorCode(err?.code || '');
       setErrorMessage(err?.message || 'Credenciales inválidas en Firebase Authentication. Acceso denegado.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Sign in / Register with Google via Firebase Authentication
-  const handleGoogleAuth = async () => {
-    setErrorMessage('');
-    setErrorCode('');
-    setSuccessMessage('');
-    setIsSubmitting(true);
-    try {
-      const authenticatedUser = await loginWithGoogleFirebaseAuth(rememberMe);
-      soundAlert.playFeedbackBeep();
-      onLogin(authenticatedUser);
-      if (!isGateMode) onClose();
-    } catch (err: any) {
-      soundAlert.playFeedbackBeep();
-      setErrorCode(err?.code || '');
-      setErrorMessage(err?.message || 'No se pudo autenticar con Google en Firebase Auth.');
     } finally {
       setIsSubmitting(false);
     }
@@ -579,16 +558,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </button>
           </form>
 
-          <button
-            type="button"
-            disabled={isSubmitting}
-            onClick={handleGoogleAuth}
-            className="w-full py-2.5 px-4 text-xs font-bold bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white border border-slate-700 rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Continuar con Google (Firebase Auth)</span>
-          </button>
-
         </div>
       )}
 
@@ -697,16 +666,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           >
             {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
             <span>{isSubmitting ? 'Registrando en Firebase Auth...' : 'Crear Cuenta en Firebase Auth'}</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={isSubmitting}
-            onClick={handleGoogleAuth}
-            className="w-full py-2.5 px-3 text-xs font-bold bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white border border-slate-700 rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Crear / Ingresar con Google (Firebase Auth)</span>
           </button>
         </form>
       )}
