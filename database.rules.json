@@ -41,6 +41,18 @@
         ".write": true
       }
     },
+    "bitacora_contingencias": {
+      ".read": true,
+      "$alertId": {
+        ".write": true
+      }
+    },
+    "simulacros_bitacora": {
+      ".read": true,
+      "$recordId": {
+        ".write": true
+      }
+    },
     "simulacro": {
       ".read": true,
       ".write": true

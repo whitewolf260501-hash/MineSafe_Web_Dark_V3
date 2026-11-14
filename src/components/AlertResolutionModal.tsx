@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, 
   AlertTriangle, 
@@ -17,7 +17,7 @@ interface AlertResolutionModalProps {
   alert: SafetyAlert | null;
   currentUser?: UserProfile | null;
   onClose: () => void;
-  onConfirmResolution: (alertId: string, details: AlertResolutionDetails) => void;
+  onConfirmResolution: (alertId: string, details: AlertResolutionDetails) => Promise<void> | void;
 }
 
 export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
@@ -26,15 +26,34 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
   onClose,
   onConfirmResolution,
 }) => {
-  const [resolutionType, setResolutionType] = useState<AlertResolutionType>('simulacro');
-  const [comment, setComment] = useState('');
-  const [correctiveActions, setCorrectiveActions] = useState('');
-  const [supervisorName, setSupervisorName] = useState(currentUser?.name || 'Manuel Crisostomo');
+  const [resolutionType, setResolutionType] = useState<AlertResolutionType>(
+    alert?.resolutionDetails?.resolutionType || 'simulacro'
+  );
+  const [comment, setComment] = useState(alert?.resolutionDetails?.comment || '');
+  const [correctiveActions, setCorrectiveActions] = useState(
+    alert?.resolutionDetails?.correctiveActions || ''
+  );
+  const [supervisorName, setSupervisorName] = useState(
+    alert?.resolutionDetails?.resolvedBy || currentUser?.name || 'Manuel Crisostomo'
+  );
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!alert) return;
+    setResolutionType(alert.resolutionDetails?.resolutionType || 'simulacro');
+    setComment(alert.resolutionDetails?.comment || '');
+    setCorrectiveActions(alert.resolutionDetails?.correctiveActions || '');
+    setSupervisorName(
+      alert.resolutionDetails?.resolvedBy || currentUser?.name || 'Manuel Crisostomo'
+    );
+    setErrorNotice(null);
+    setIsSaving(false);
+  }, [alert, currentUser]);
 
   if (!alert) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!comment.trim()) {
       setErrorNotice('Debe ingresar una descripción de lo ocurrido para la bitácora de seguridad.');
@@ -44,7 +63,8 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
     const details: AlertResolutionDetails = {
       resolutionType,
       comment: comment.trim(),
-      correctiveActions: correctiveActions.trim() || 'Verificación visual y restablecimiento de condición basal normal.',
+      correctiveActions:
+        correctiveActions.trim() || 'Verificación visual y restablecimiento de condición basal normal.',
       resolvedBy: supervisorName.trim() || 'Prevencionista de Turno',
       resolvedAt: new Date().toLocaleString('es-CL', {
         day: '2-digit',
@@ -55,8 +75,18 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
       }),
     };
 
-    onConfirmResolution(alert.id, details);
-    onClose();
+    try {
+      setIsSaving(true);
+      setErrorNotice(null);
+      await onConfirmResolution(alert.id, details);
+      onClose();
+    } catch (err: any) {
+      setErrorNotice(
+        err?.message || 'No se pudo guardar la descripción en Firebase RTDB. Intenta nuevamente.'
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const resolutionOptions: {
@@ -259,16 +289,18 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-colors"
+              disabled={isSaving}
+              className="px-4 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded-xl transition-colors"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-lg shadow-emerald-950 transition-all flex items-center gap-2"
+              disabled={isSaving}
+              className="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-xl shadow-lg shadow-emerald-950 transition-all flex items-center gap-2"
             >
               <CheckCircle2 className="w-4 h-4" />
-              Guardar Bitácora y Dar por Resuelta
+              {isSaving ? 'Guardando en Firebase...' : 'Guardar Bitácora y Dar por Resuelta'}
             </button>
           </div>
 

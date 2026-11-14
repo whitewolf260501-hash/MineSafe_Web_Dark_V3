@@ -1231,27 +1231,57 @@ export async function broadcastDrillToRTDB(
   }
 }
 
+function formatAlertTimestamp(ts: unknown, fallbackText?: string): string {
+  if (typeof ts === 'number' && !isNaN(ts) && ts > 0) {
+    return new Date(ts).toLocaleString('es-CL', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+  if (typeof ts === 'string' && ts.trim()) {
+    return ts;
+  }
+  return fallbackText || 'Reciente';
+}
+
+function buildAlertBasePayload(alert: SafetyAlert, now: number): Record<string, any> {
+  return {
+    id: alert.id,
+    codigo: alert.code,
+    titulo: alert.title,
+    severidad: alert.severity,
+    variable: alert.variableName,
+    sensorId: alert.sensorId,
+    sensorCode: alert.sensorCode,
+    sector: alert.sectorName,
+    valor: alert.recordedValue,
+    limite: alert.safeLimit,
+    atendida: Boolean(alert.acknowledged),
+    ...(alert.acknowledgedBy ? { atendida_por: alert.acknowledgedBy } : {}),
+    resuelta: Boolean(alert.resolved),
+    accionSugerida: alert.suggestedAction || '',
+    creado_en_texto: alert.timestamp || formatAlertTimestamp(alert.timestampMs || now),
+    timestamp: alert.timestampMs || now,
+  };
+}
+
 export async function broadcastAlertToRTDB(alert: SafetyAlert): Promise<void> {
   try {
-    const now = Date.now();
-    // 1. Store in RTDB /alertas
+    const now = alert.timestampMs || Date.now();
     const alertRef = ref(rtdb, `alertas/${alert.id}`);
-    await set(alertRef, {
-      id: alert.id,
-      codigo: alert.code,
-      titulo: alert.title,
-      severidad: alert.severity,
-      variable: alert.variableName,
-      sensorId: alert.sensorId,
-      sensorCode: alert.sensorCode,
-      sector: alert.sectorName,
-      valor: alert.recordedValue,
-      limite: alert.safeLimit,
-      atendida: alert.acknowledged,
-      resuelta: alert.resolved,
-      accionSugerida: alert.suggestedAction,
-      timestamp: now,
-    });
+    const payload = buildAlertBasePayload(alert, now);
+    if (alert.resolutionDetails) {
+      payload.tipo_resolucion = alert.resolutionDetails.resolutionType;
+      payload.descripcion_cierre = alert.resolutionDetails.comment;
+      payload.acciones_correctivas = alert.resolutionDetails.correctiveActions || '';
+      payload.resuelto_por = alert.resolutionDetails.resolvedBy;
+      payload.resuelto_en = alert.resolutionDetails.resolvedAt;
+      payload.timestamp_cierre = now;
+    }
+    await set(alertRef, payload);
 
     // 2. If it's a critical alert, activate alarma and buzzer on RTDB devices so hardware/web react
     if (alert.severity === 'critico') {
@@ -1280,6 +1310,153 @@ export async function broadcastAlertToRTDB(alert: SafetyAlert): Promise<void> {
   }
 }
 
+export async function acknowledgeAlertInRTDB(
+  alertOrId: SafetyAlert | string,
+  acknowledgedBy: string
+): Promise<void> {
+  const alertId = typeof alertOrId === 'string' ? alertOrId : alertOrId.id;
+  const now = Date.now();
+  const baseFields =
+    typeof alertOrId === 'object' && alertOrId !== null
+      ? buildAlertBasePayload(alertOrId, alertOrId.timestampMs || now)
+      : {};
+
+  await update(ref(rtdb, `alertas/${alertId}`), {
+    ...baseFields,
+    id: alertId,
+    atendida: true,
+    atendida_por: acknowledgedBy,
+    timestamp_atendida: now,
+  });
+}
+
+export function subscribeToRTDBAlerts(callback: (alerts: SafetyAlert[]) => void): () => void {
+  let rawAlertas: Record<string, any> = {};
+  let rawBitacora: Record<string, any> = {};
+  let alertasReady = false;
+
+  const emitCombined = () => {
+    if (!alertasReady) return;
+    const allIds = new Set([...Object.keys(rawAlertas), ...Object.keys(rawBitacora)]);
+    const mapped: SafetyAlert[] = [];
+
+    allIds.forEach((id) => {
+      const data = rawAlertas[id] || {};
+      const bit = rawBitacora[id] || {};
+      if (!data && !bit) return;
+
+      const resolved = Boolean(data.resuelta || bit.descripcion || bit.tipoResolucion);
+      const comment = data.descripcion_cierre || bit.descripcion || '';
+      const hasResolution =
+        resolved ||
+        Boolean(comment) ||
+        Boolean(data.tipo_resolucion) ||
+        Boolean(bit.tipoResolucion);
+
+      const tsNum =
+        typeof data.timestamp === 'number'
+          ? data.timestamp
+          : typeof data.timestamp_cierre === 'number'
+          ? data.timestamp_cierre
+          : typeof bit.timestamp === 'number'
+          ? bit.timestamp
+          : 0;
+
+      const mappedAlert: SafetyAlert = {
+        id,
+        code: data.codigo || id,
+        title: data.titulo || (bit.idAlerta ? `Contingencia Registrada (${bit.idAlerta})` : 'Alerta de Seguridad'),
+        severity: (data.severidad as SafetyAlert['severity']) || 'advertencia',
+        variableName: data.variable || 'Variable Ambiental',
+        sensorId: data.sensorId || 'device_38A839E81F84',
+        sensorCode: data.sensorCode || data.sensorId || 'ESP32',
+        sectorName: data.sector || 'Mina Chuquicamata - Rampa Principal',
+        recordedValue: data.valor || '-',
+        safeLimit: data.limite || '-',
+        timestamp: data.creado_en_texto || formatAlertTimestamp(tsNum, bit.fecha),
+        timestampMs: tsNum,
+        acknowledged: Boolean(data.atendida || resolved),
+        acknowledgedBy: data.atendida_por,
+        resolved,
+        suggestedAction:
+          data.accionSugerida ||
+          data.descripcion ||
+          'Verificar condiciones del sector y registrar medidas de control.',
+        ...(hasResolution
+          ? {
+              resolutionDetails: {
+                resolutionType: data.tipo_resolucion || bit.tipoResolucion || 'simulacro',
+                comment,
+                correctiveActions: data.acciones_correctivas || bit.accionesCorrectivas || '',
+                resolvedBy: data.resuelto_por || bit.supervisor || 'Supervisor de Turno',
+                resolvedAt:
+                  data.resuelto_en ||
+                  bit.fecha ||
+                  formatAlertTimestamp(data.timestamp_cierre || bit.timestamp),
+              },
+            }
+          : {}),
+      };
+
+      mapped.push(mappedAlert);
+    });
+
+    // Sort newest first by epoch ms
+    mapped.sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0));
+
+    // Keep ALL user-generated/simulated/resolved/acknowledged alerts, and deduplicate
+    // unacknowledged active automatic threshold events (evt_<deviceId>_<var>_<ts>) so
+    // multiple browser tabs or reloads don't flood the active list with hundreds of duplicates.
+    const seenActiveEvtKeys = new Set<string>();
+    const deduped: SafetyAlert[] = [];
+
+    for (const item of mapped) {
+      const isAutoThresholdEvent =
+        item.id.startsWith('evt_') && !item.resolved && !item.acknowledged && !item.resolutionDetails?.comment;
+      if (isAutoThresholdEvent) {
+        const dedupKey = `${item.sensorId}::${item.variableName}`;
+        if (seenActiveEvtKeys.has(dedupKey)) {
+          continue;
+        }
+        seenActiveEvtKeys.add(dedupKey);
+      }
+      deduped.push(item);
+    }
+
+    callback(deduped);
+  };
+
+  const unsubAlertas = onValue(
+    ref(rtdb, 'alertas'),
+    (snapshot) => {
+      rawAlertas = snapshot.exists() ? snapshot.val() || {} : {};
+      alertasReady = true;
+      emitCombined();
+    },
+    (err) => {
+      console.warn('Error subscribing to RTDB /alertas:', err);
+      alertasReady = true;
+      emitCombined();
+    }
+  );
+
+  const unsubBitacora = onValue(
+    ref(rtdb, 'bitacora_contingencias'),
+    (snapshot) => {
+      rawBitacora = snapshot.exists() ? snapshot.val() || {} : {};
+      emitCombined();
+    },
+    (err) => {
+      console.warn('Error subscribing to RTDB /bitacora_contingencias:', err);
+    }
+  );
+
+  return () => {
+    unsubAlertas();
+    unsubBitacora();
+  };
+}
+
 export function subscribeToRTDBDrill(callback: (drillState: { active: boolean; type?: string; nombre?: string }) => void): () => void {
   const simulacroRef = ref(rtdb, 'simulacro');
   return onValue(simulacroRef, (snapshot) => {
@@ -1299,34 +1476,73 @@ export function subscribeToRTDBDrill(callback: (drillState: { active: boolean; t
  * Guarda si fue una emergencia real, simulacro, falla de sensor o prueba operativa,
  * junto con la descripción y medidas adoptadas por el usuario/supervisor.
  */
-export async function resolveAlertInRTDB(alertId: string, details: AlertResolutionDetails): Promise<void> {
-  try {
-    const alertRef = ref(rtdb, `alertas/${alertId}`);
-    await update(alertRef, {
-      resuelta: true,
-      atendida: true,
-      tipo_resolucion: details.resolutionType,
-      descripcion_cierre: details.comment,
-      acciones_correctivas: details.correctiveActions || '',
-      resuelto_por: details.resolvedBy,
-      resuelto_en: details.resolvedAt,
-      timestamp_cierre: Date.now(),
-    });
+export async function resolveAlertInRTDB(
+  alertOrId: SafetyAlert | string,
+  details: AlertResolutionDetails
+): Promise<void> {
+  const alertId = typeof alertOrId === 'string' ? alertOrId : alertOrId.id;
+  const now = Date.now();
+  const baseFields =
+    typeof alertOrId === 'object' && alertOrId !== null
+      ? buildAlertBasePayload(alertOrId, alertOrId.timestampMs || now)
+      : {};
 
-    // Guardar copia histórica en la bitácora de contingencias
-    const bitacoraRef = ref(rtdb, `bitacora_contingencias/${alertId}`);
-    await set(bitacoraRef, {
-      idAlerta: alertId,
-      tipoResolucion: details.resolutionType,
-      descripcion: details.comment,
-      accionesCorrectivas: details.correctiveActions || '',
-      supervisor: details.resolvedBy,
-      fecha: details.resolvedAt,
-      timestamp: Date.now(),
-    });
-  } catch (err) {
-    console.warn('Error saving alert resolution to RTDB:', err);
-  }
+  const alertRef = ref(rtdb, `alertas/${alertId}`);
+  await update(alertRef, {
+    ...baseFields,
+    id: alertId,
+    resuelta: true,
+    atendida: true,
+    tipo_resolucion: details.resolutionType,
+    descripcion_cierre: details.comment,
+    acciones_correctivas: details.correctiveActions || '',
+    resuelto_por: details.resolvedBy,
+    resuelto_en: details.resolvedAt,
+    timestamp_cierre: now,
+  });
+
+  // Guardar copia histórica en la bitácora de contingencias (no bloquea si reglas antiguas aún no lo incluyen)
+  const bitacoraRef = ref(rtdb, `bitacora_contingencias/${alertId}`);
+  await set(bitacoraRef, {
+    idAlerta: alertId,
+    tipoResolucion: details.resolutionType,
+    descripcion: details.comment,
+    accionesCorrectivas: details.correctiveActions || '',
+    supervisor: details.resolvedBy,
+    fecha: details.resolvedAt,
+    timestamp: now,
+  }).catch((err) => {
+    console.warn('Warning saving copy to bitacora_contingencias:', err);
+  });
+}
+
+export async function resolveActiveAlertsInRTDB(
+  alertsToClose: SafetyAlert[],
+  reasonText: string,
+  resolvedBy: string
+): Promise<void> {
+  const unresolved = alertsToClose.filter((a) => !a.resolved);
+  if (unresolved.length === 0) return;
+  const now = Date.now();
+  const resolvedAt = formatAlertTimestamp(now);
+
+  await Promise.all(
+    unresolved.map(async (alert) => {
+      const baseFields = buildAlertBasePayload(alert, alert.timestampMs || now);
+      await update(ref(rtdb, `alertas/${alert.id}`), {
+        ...baseFields,
+        id: alert.id,
+        resuelta: true,
+        atendida: true,
+        tipo_resolucion: alert.id.startsWith('alt-drill-') ? 'simulacro' : 'prueba_operativa',
+        descripcion_cierre: reasonText,
+        acciones_correctivas: 'Restablecimiento de niveles normales y silenciamiento desde consola central.',
+        resuelto_por: resolvedBy,
+        resuelto_en: resolvedAt,
+        timestamp_cierre: now,
+      }).catch(() => {});
+    })
+  );
 }
 
 /**

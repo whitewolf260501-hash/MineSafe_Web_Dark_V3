@@ -145,6 +145,7 @@ export interface SafetyAlert {
   recordedValue: string;
   safeLimit: string;
   timestamp: string;
+  timestampMs?: number;
   acknowledged: boolean;
   acknowledgedBy?: string;
   resolved: boolean;

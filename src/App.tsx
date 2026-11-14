@@ -56,8 +56,11 @@ import {
   resetGatewayDataInRTDB,
   broadcastDrillToRTDB,
   broadcastAlertToRTDB,
+  acknowledgeAlertInRTDB,
+  subscribeToRTDBAlerts,
   subscribeToRTDBDrill,
   resolveAlertInRTDB,
+  resolveActiveAlertsInRTDB,
   saveDrillDebriefInRTDB,
   DEFAULT_PLATFORM_CONFIG,
   subscribeToPlatformConfig,
@@ -103,6 +106,8 @@ export default function App() {
   const [variables, setVariables] = useState<TelemetryVariable[]>(INITIAL_VARIABLES);
   const [devices, setDevices] = useState<SensorDevice[]>([INITIAL_SINGLE_DEVICE]);
   const [alerts, setAlerts] = useState<SafetyAlert[]>(INITIAL_ALERTS);
+  const alertsRef = React.useRef<SafetyAlert[]>(INITIAL_ALERTS);
+  alertsRef.current = alerts;
   const [rentals, setRentals] = useState<DeviceRental[]>(INITIAL_RENTALS);
   const [assignments, setAssignments] = useState<WorkerAssignment[]>(INITIAL_ASSIGNMENTS);
   const [sites, setSites] = useState<MiningSite[]>(MINING_SITES);
@@ -150,6 +155,7 @@ export default function App() {
     let unsubDevices: (() => void) | null = null;
     let unsubUsers: (() => void) | null = null;
     let unsubRentals: (() => void) | null = null;
+    let unsubAlerts: (() => void) | null = null;
     let unsubDrill: (() => void) | null = null;
     let unsubPlatform: (() => void) | null = null;
 
@@ -184,6 +190,17 @@ export default function App() {
         }
       });
 
+      // Realtime listener for Alerts & Incident Descriptions (/alertas + /bitacora_contingencias)
+      unsubAlerts = subscribeToRTDBAlerts((remoteAlerts) => {
+        const remoteIds = new Set(remoteAlerts.map((a) => a.id));
+        const merged = [
+          ...remoteAlerts,
+          ...INITIAL_ALERTS.filter((mockAlert) => !remoteIds.has(mockAlert.id)),
+        ];
+        alertEngine.syncExistingActiveAlerts(merged);
+        setAlerts(merged);
+      });
+
       // Realtime listener for Drill & Emergency broadcasts (e.g., triggered from Android app)
       unsubDrill = subscribeToRTDBDrill((drillState) => {
         if (drillState.active) {
@@ -207,6 +224,7 @@ export default function App() {
       if (unsubDevices) unsubDevices();
       if (unsubUsers) unsubUsers();
       if (unsubRentals) unsubRentals();
+      if (unsubAlerts) unsubAlerts();
       if (unsubDrill) unsubDrill();
       if (unsubPlatform) unsubPlatform();
     };
@@ -470,30 +488,54 @@ export default function App() {
     );
   }, []);
 
-  const handleAcknowledgeAlert = useCallback((alertId: string) => {
+  const handleAcknowledgeAlert = useCallback(async (alertId: string) => {
     soundAlert.playFeedbackBeep();
+    const ackBy = currentUser?.name || 'Operador';
+    const targetAlert = alertsRef.current.find((a) => a.id === alertId);
     setAlerts((prev) =>
       prev.map((a) =>
         a.id === alertId
-          ? { ...a, acknowledged: true, acknowledgedBy: currentUser?.name || 'Operador' }
+          ? { ...a, acknowledged: true, acknowledgedBy: ackBy }
           : a
       )
     );
-  }, [currentUser]);
+    try {
+      await acknowledgeAlertInRTDB(targetAlert || alertId, ackBy);
+    } catch (err: any) {
+      showAlarmFeedback(err?.message || 'Error al registrar reconocimiento en Firebase RTDB.', 'error');
+    }
+  }, [currentUser, showAlarmFeedback]);
 
-  const handleResolveAlert = useCallback((alertId: string) => {
+  const handleResolveAlert = useCallback(async (alertId: string) => {
     soundAlert.playFeedbackBeep();
+    const targetAlert = alertsRef.current.find((a) => a.id === alertId);
+    const defaultDetails: AlertResolutionDetails = targetAlert?.resolutionDetails || {
+      resolutionType: 'prueba_operativa',
+      comment: 'Alerta marcada como resuelta desde consola de seguridad.',
+      correctiveActions: 'Verificación de condiciones ambientales en rango seguro.',
+      resolvedBy: currentUser?.name || 'Supervisor de Turno',
+      resolvedAt: new Date().toLocaleString('es-CL', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+    };
     setAlerts((prev) =>
       prev.map((a) =>
         a.id === alertId
-          ? { ...a, resolved: true, acknowledged: true }
+          ? { ...a, resolved: true, acknowledged: true, resolutionDetails: defaultDetails }
           : a
       )
     );
-  }, []);
+    await resolveAlertInRTDB(targetAlert || alertId, defaultDetails).catch(() => {});
+  }, [currentUser]);
 
   const handleResolveAlertWithDetails = useCallback(async (alertId: string, details: AlertResolutionDetails) => {
     soundAlert.playFeedbackBeep();
+    const targetAlert = alertsRef.current.find((a) => a.id === alertId);
+    await resolveAlertInRTDB(targetAlert || alertId, details);
     setAlerts((prev) =>
       prev.map((a) =>
         a.id === alertId
@@ -506,8 +548,8 @@ export default function App() {
           : a
       )
     );
-    await resolveAlertInRTDB(alertId, details);
-  }, []);
+    showAlarmFeedback('Alerta y descripción guardadas en Firebase RTDB.', 'success');
+  }, [showAlarmFeedback]);
 
   const handleSaveDrillDebrief = useCallback(async (record: DrillDebriefRecord) => {
     await saveDrillDebriefInRTDB(record);
@@ -548,9 +590,10 @@ export default function App() {
         : [...prev, updatedDevice]
     );
 
+    const now = Date.now();
     // Create a new safety alert
     const newAlert: SafetyAlert = {
-      id: `alt-${Date.now()}`,
+      id: `alt-${now}`,
       code: `ALT-SIM-${Math.floor(Math.random() * 900 + 100)}`,
       title: 'Detección Crítica de Monóxido de Carbono (CO > 50 ppm)',
       severity: 'critico',
@@ -560,7 +603,14 @@ export default function App() {
       sectorName: targetDev.sectorName,
       recordedValue: '52.8 ppm (1250 ADC)',
       safeLimit: '< 25.0 ppm',
-      timestamp: 'Justo ahora',
+      timestamp: new Date(now).toLocaleString('es-CL', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      timestampMs: now,
       acknowledged: false,
       resolved: false,
       suggestedAction: 'Evacuar personal inmediatamente hacia zona segura y activar extractores al 100%.',
@@ -625,7 +675,12 @@ export default function App() {
       setEvacuationActive(false);
       setDismissEmergencyBanner(true);
 
-      setAlerts(prev => prev.map(a => ({ ...a, resolved: true, acknowledged: true })));
+      setAlerts(prev => prev.map(a => (!a.resolved ? { ...a, resolved: true, acknowledged: true } : a)));
+      resolveActiveAlertsInRTDB(
+        alertsRef.current.filter((a) => !a.resolved && a.id.startsWith('alt-')),
+        'Alarma apagada completamente por SuperAdministrador.',
+        currentUser.name || 'SuperAdmin'
+      ).catch(() => {});
       setDevices(prev => prev.map(d => (d.id === targetId || d.id === 'device_38A839E81F84') ? {
         ...d,
         alarmaActiva: false,
@@ -665,7 +720,7 @@ export default function App() {
       setEvacuationActive(false);
       setDismissEmergencyBanner(true);
 
-      setAlerts(prev => prev.map(a => ({ ...a, resolved: true, acknowledged: true })));
+      setAlerts(prev => prev.map(a => (!a.resolved ? { ...a, resolved: true, acknowledged: true } : a)));
       setVariables(INITIAL_VARIABLES);
       showAlarmFeedback('Niveles basales y comando APAGAR sincronizados en Firebase RTDB.', 'success');
     } catch (err: any) {
@@ -707,8 +762,9 @@ export default function App() {
       evacuacion_sirena: '[SIMULACRO DS 132] Evacuación Inmediata de Faena por Alarma Sonora y Baliza',
     };
 
+    const now = Date.now();
     const newAlert: SafetyAlert = {
-      id: `alt-drill-${Date.now()}`,
+      id: `alt-drill-${now}`,
       code: `SIM-DRILL-${Math.floor(Math.random() * 800 + 100)}`,
       title: titleMap[type],
       severity: 'critico',
@@ -718,7 +774,14 @@ export default function App() {
       sectorName: dev?.sectorName || 'Mina Chuquicamata - Rampa Principal',
       recordedValue: type === 'gas_critico' ? '1250 ADC (55.4 ppm)' : type === 'incendio_polvo' ? '650 µg/m³' : 'Sirena y Baliza Activas',
       safeLimit: type === 'gas_critico' ? '< 25.0 ppm' : '< 50 µg/m³',
-      timestamp: 'Simulacro en curso',
+      timestamp: new Date(now).toLocaleString('es-CL', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      timestampMs: now,
       acknowledged: false,
       resolved: false,
       suggestedAction: 'Protocolo de entrenamiento: desplazar cuadrilla hacia refugio hermético y activar mangas de ventilación.',
@@ -726,8 +789,9 @@ export default function App() {
 
     setAlerts(prev => [newAlert, ...prev]);
 
-    // Broadcast drill to Firebase Realtime Database on active device and root /simulacro
+    // Broadcast drill and save drill alert to Firebase Realtime Database (/simulacro + /alertas)
     await broadcastDrillToRTDB(true, type, dev?.id || 'device_38A839E81F84');
+    await broadcastAlertToRTDB(newAlert);
   }, [visibleDevices, activeTelemetryDeviceId]);
 
   const handleStopDrill = useCallback(async () => {
@@ -759,7 +823,12 @@ export default function App() {
         metrics: { ...d.metrics, co: 8.5, polvoPM: 25 }
       } : d));
 
-      setAlerts(prev => prev.map(a => a.id.startsWith('alt-drill-') ? { ...a, resolved: true, acknowledged: true } : a));
+      setAlerts(prev => prev.map(a => (a.id.startsWith('alt-drill-') && !a.resolved ? { ...a, resolved: true, acknowledged: true } : a)));
+      await resolveActiveAlertsInRTDB(
+        alertsRef.current.filter((a) => !a.resolved && a.id.startsWith('alt-drill-')),
+        'Simulacro finalizado desde consola central.',
+        currentUser.name || 'SuperAdmin'
+      ).catch(() => {});
       showAlarmFeedback('Simulacro finalizado y comando_web="APAGAR" enviado a Firebase RTDB.', 'success');
     } catch (err: any) {
       showAlarmFeedback(err?.message || 'Error al detener el simulacro en Firebase RTDB.', 'error');

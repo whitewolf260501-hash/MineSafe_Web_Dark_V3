@@ -2,7 +2,8 @@ import {
   SensorDevice, 
   DeviceThresholdsConfig, 
   AlertEventRecord, 
-  AlertThresholdLevel 
+  AlertThresholdLevel,
+  SafetyAlert
 } from '../types';
 import { 
   saveAlertThresholdEvent, 
@@ -249,6 +250,35 @@ class AlertEngine {
    */
   public clearActiveIncidents(): void {
     this.activeIncidents.clear();
+  }
+
+  /**
+   * Sincroniza incidentes activos existentes en RTDB (/alertas/evt_*) para evitar
+   * duplicar alertas automáticas al recargar la página o abrir otra pestaña.
+   */
+  public syncExistingActiveAlerts(existingAlerts: SafetyAlert[]): void {
+    const validVars = new Set(['pm25', 'mq2', 'temperatura', 'humedad']);
+    existingAlerts.forEach((a) => {
+      if (a.resolved || !a.id.startsWith('evt_')) return;
+      const parts = a.id.split('_');
+      if (parts.length < 4) return;
+      const tsStr = parts[parts.length - 1];
+      const varKey = parts[parts.length - 2] as 'pm25' | 'mq2' | 'temperatura' | 'humedad';
+      if (!validVars.has(varKey)) return;
+      const deviceId = parts.slice(1, parts.length - 2).join('_');
+      const incidentKey = `${deviceId}:${varKey}`;
+      if (!this.activeIncidents.has(incidentKey)) {
+        this.activeIncidents.set(incidentKey, {
+          id: a.id,
+          deviceId,
+          variable: varKey,
+          severity: a.severity === 'critico' ? 'critico' : 'advertencia',
+          thresholdExceeded: 0,
+          initialTimestamp: Number(tsStr) || a.timestampMs || Date.now(),
+          lastValue: 0,
+        });
+      }
+    });
   }
 
   /**

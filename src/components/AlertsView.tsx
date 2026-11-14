@@ -48,7 +48,7 @@ interface AlertsViewProps {
   currentUser?: UserProfile | null;
   onAcknowledgeAlert: (alertId: string) => void;
   onResolveAlert: (alertId: string) => void;
-  onResolveAlertWithDetails?: (alertId: string, details: AlertResolutionDetails) => void;
+  onResolveAlertWithDetails?: (alertId: string, details: AlertResolutionDetails) => Promise<void> | void;
   onTriggerForcedVentilation: (sectorName: string) => void;
   onNavigateTab: (tab: NavigationTab) => void;
   onSelectSensor: (sensorId: string) => void;
@@ -103,18 +103,39 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
       filterStatus === 'all' || 
       (filterStatus === 'active' && !alert.resolved) || 
       (filterStatus === 'resolved' && alert.resolved);
+    const q = searchQuery.toLowerCase();
     const matchesSearch = 
-      alert.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      alert.sectorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      alert.sensorCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      alert.variableName.toLowerCase().includes(searchQuery.toLowerCase());
+      !q ||
+      alert.title.toLowerCase().includes(q) ||
+      alert.code.toLowerCase().includes(q) ||
+      alert.sectorName.toLowerCase().includes(q) ||
+      alert.sensorCode.toLowerCase().includes(q) ||
+      alert.variableName.toLowerCase().includes(q) ||
+      (alert.resolutionDetails?.comment || '').toLowerCase().includes(q) ||
+      (alert.resolutionDetails?.correctiveActions || '').toLowerCase().includes(q);
 
     return matchesSeverity && matchesStatus && matchesSearch;
   });
 
   const activeAlertsCount = alerts.filter(a => !a.resolved).length;
+  const resolvedAlertsCount = alerts.filter(a => a.resolved).length;
   const criticalCount = alerts.filter(a => !a.resolved && a.severity === 'critico').length;
   const warningCount = alerts.filter(a => !a.resolved && a.severity === 'advertencia').length;
+
+  const getResolutionTypeLabel = (type?: string) => {
+    switch (type) {
+      case 'emergencia_real':
+        return { label: 'Emergencia Real / Fuga Verdadera', cls: 'bg-rose-950/90 text-rose-300 border-rose-800' };
+      case 'simulacro':
+        return { label: 'Simulacro / Entrenamiento', cls: 'bg-amber-950/90 text-amber-300 border-amber-800' };
+      case 'falsa_alarma_sensor':
+        return { label: 'Falsa Alarma / Falla de Sensor', cls: 'bg-cyan-950/90 text-cyan-300 border-cyan-800' };
+      case 'prueba_operativa':
+        return { label: 'Prueba Operativa / Mantenimiento', cls: 'bg-emerald-950/90 text-emerald-300 border-emerald-800' };
+      default:
+        return { label: 'Contingencia Documentada', cls: 'bg-slate-800 text-slate-300 border-slate-700' };
+    }
+  };
 
   const showExportToast = (msg: string) => {
     setExportNotice(msg);
@@ -503,9 +524,9 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                 onChange={(e) => setFilterStatus(e.target.value as any)}
                 className="px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-cyan-500"
               >
-                <option value="active">Solo Activas</option>
-                <option value="resolved">Solo Resueltas</option>
-                <option value="all">Todas</option>
+                <option value="active">Solo Activas ({activeAlertsCount})</option>
+                <option value="resolved">Solo Resueltas ({resolvedAlertsCount})</option>
+                <option value="all">Todas ({alerts.length})</option>
               </select>
             </div>
           </div>
@@ -519,22 +540,35 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                 <p className="text-xs text-slate-400 mt-1">Todos los sectores monitoreados operan dentro de los umbrales seguros.</p>
               </div>
             ) : (
-              filteredAlerts.map((alert) => (
+              filteredAlerts.map((alert) => {
+                const resBadge = alert.resolutionDetails
+                  ? getResolutionTypeLabel(alert.resolutionDetails.resolutionType)
+                  : null;
+
+                return (
                 <div
                   key={alert.id}
                   className={`p-4 rounded-xl border transition-all ${
                     alert.resolved
-                      ? 'bg-slate-900/40 border-slate-800/80 opacity-70'
+                      ? 'bg-slate-900/60 border-slate-800/90'
                       : alert.severity === 'critico'
                       ? 'bg-rose-950/20 border-rose-800/70 hover:border-rose-600'
                       : 'bg-amber-950/20 border-amber-800/70 hover:border-amber-600'
                   }`}
                 >
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
                         {getSeverityBadge(alert.severity)}
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950 text-slate-400 border border-slate-800">
+                          {alert.code}
+                        </span>
                         <span className="text-xs font-bold text-white tracking-wide">{alert.title}</span>
+                        {alert.acknowledged && !alert.resolved && (
+                          <span className="text-[10px] font-semibold text-cyan-300 bg-cyan-950/70 px-2 py-0.5 rounded border border-cyan-800/70">
+                            Reconocida{alert.acknowledgedBy ? `: ${alert.acknowledgedBy}` : ''}
+                          </span>
+                        )}
                         {alert.resolved && (
                           <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
                             RESUELTA
@@ -544,16 +578,52 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                       <p className="text-xs text-slate-300">
                         {alert.suggestedAction || `${alert.variableName}: ${alert.recordedValue} (Límite seguro: ${alert.safeLimit})`}
                       </p>
-                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400 pt-1">
+                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400 pt-0.5">
                         <span>Sector: <strong className="text-slate-200">{alert.sectorName}</strong></span>
                         <span>•</span>
                         <span>Sensor: <strong className="text-cyan-400 font-mono">{alert.sensorCode}</strong></span>
+                        <span>•</span>
+                        <span>Lectura: <strong className="text-slate-200 font-mono">{alert.recordedValue}</strong></span>
                         <span>•</span>
                         <span className="flex items-center gap-1 font-mono text-slate-400">
                           <Clock className="w-3 h-3 text-slate-400" />
                           {alert.timestamp}
                         </span>
                       </div>
+
+                      {alert.resolutionDetails && (
+                        <div className="mt-2.5 p-3 rounded-lg bg-slate-950/85 border border-emerald-900/60 space-y-1.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-300">
+                              <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                              Descripción Guardada en Bitácora
+                            </span>
+                            {resBadge && (
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${resBadge.cls}`}>
+                                {resBadge.label}
+                              </span>
+                            )}
+                          </div>
+                          {alert.resolutionDetails.comment && (
+                            <p className="text-xs text-slate-200 leading-relaxed">
+                              {alert.resolutionDetails.comment}
+                            </p>
+                          )}
+                          {alert.resolutionDetails.correctiveActions && (
+                            <p className="text-[11px] text-slate-400">
+                              <strong className="text-slate-300">Medidas adoptadas:</strong>{' '}
+                              {alert.resolutionDetails.correctiveActions}
+                            </p>
+                          )}
+                          <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-400 pt-0.5">
+                            <span>
+                              Responsable: <strong className="text-cyan-300">{alert.resolutionDetails.resolvedBy}</strong>
+                            </span>
+                            <span>•</span>
+                            <span className="font-mono">{alert.resolutionDetails.resolvedAt}</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
@@ -597,7 +667,8 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                     </div>
                   </div>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -778,14 +849,14 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
           alert={alertToResolve}
           currentUser={currentUser}
           onClose={() => setAlertToResolve(null)}
-          onConfirmResolution={(alertId, details) => {
+          onConfirmResolution={async (alertId, details) => {
             if (onResolveAlertWithDetails) {
-              onResolveAlertWithDetails(alertId, details);
+              await onResolveAlertWithDetails(alertId, details);
             } else {
               onResolveAlert(alertId);
             }
             soundAlert.playFeedbackBeep();
-            setAlertToResolve(null);
+            showExportToast('Alerta y descripción guardadas en Firebase RTDB (ver en "Solo Resueltas" o "Todas").');
           }}
         />
       )}
