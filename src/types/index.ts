@@ -210,6 +210,8 @@ export type ControllableTab =
   | 'faenas'
   | 'usuarios';
 
+export type EquiposSubTab = 'asignaciones' | 'arriendos' | 'pagos' | 'inventario';
+
 export type NavigationTab = ControllableTab | 'superadmin_panel';
 
 export type WindowOverrideValue = 'inherit' | 'allow' | 'block';
@@ -221,6 +223,12 @@ export interface PlatformVisibilityConfig {
   };
   userOverrides: Record<string, Partial<Record<ControllableTab, WindowOverrideValue>>>;
   userOverridesByEmail?: Record<string, Partial<Record<ControllableTab, WindowOverrideValue>>>;
+  equiposSubTabRolePermissions?: {
+    admin: Record<EquiposSubTab, boolean>;
+    operador: Record<EquiposSubTab, boolean>;
+  };
+  equiposSubTabUserOverrides?: Record<string, Partial<Record<EquiposSubTab, WindowOverrideValue>>>;
+  equiposSubTabUserOverridesByEmail?: Record<string, Partial<Record<EquiposSubTab, WindowOverrideValue>>>;
 }
 
 export interface PlatformMetricsConfig {

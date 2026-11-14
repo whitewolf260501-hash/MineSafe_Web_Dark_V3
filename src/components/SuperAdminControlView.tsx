@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import {
   ControllableTab,
+  EquiposSubTab,
   DeviceCategory,
   PlatformConfig,
   RegisteredDeviceConfig,
@@ -107,6 +108,33 @@ const CONTROLLABLE_WINDOWS: Array<{
     id: 'usuarios',
     label: 'Usuarios y Roles',
     description: 'Administración de cuentas RBAC, altas y permisos',
+  },
+];
+
+const EQUIPOS_SUB_WINDOWS: Array<{
+  id: EquiposSubTab;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: 'asignaciones',
+    label: 'Asignaciones a Cuadrillas',
+    description: 'Entrega y asignación de detectores personales a trabajadores',
+  },
+  {
+    id: 'arriendos',
+    label: 'Contratos de Arriendo',
+    description: 'Vigencia, proveedores y contratos de equipos arrendados',
+  },
+  {
+    id: 'pagos',
+    label: 'Estado de Pagos y Facturas',
+    description: 'Cánones mensuales, vencimientos y registro de pagos',
+  },
+  {
+    id: 'inventario',
+    label: 'Stock de Sensores IoT',
+    description: 'Inventario técnico, baterías, señal y estado en terreno',
   },
 ];
 
@@ -296,6 +324,76 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
     });
   };
 
+  const handleToggleEquiposSubTabRole = (role: 'admin' | 'operador', subId: EquiposSubTab) => {
+    soundAlert.playFeedbackBeep();
+    commitVisibilityChange((prev) => {
+      const currentPerms = prev.visibility.equiposSubTabRolePermissions || {
+        admin: { asignaciones: true, arriendos: true, pagos: true, inventario: true },
+        operador: { asignaciones: true, arriendos: true, pagos: true, inventario: true },
+      };
+      return {
+        ...prev,
+        visibility: {
+          ...prev.visibility,
+          equiposSubTabRolePermissions: {
+            ...currentPerms,
+            [role]: {
+              ...currentPerms[role],
+              [subId]: !currentPerms[role][subId],
+            },
+          },
+        },
+      };
+    });
+  };
+
+  const handleUserEquiposSubTabOverride = (
+    targetUser: UserProfile,
+    subId: EquiposSubTab,
+    value: WindowOverrideValue
+  ) => {
+    soundAlert.playFeedbackBeep();
+    const emailKey = normalizeEmailOverrideKey(targetUser.email);
+    commitVisibilityChange((prev) => {
+      const nextOverrides = { ...(prev.visibility.equiposSubTabUserOverrides || {}) };
+      const userMap = { ...(nextOverrides[targetUser.id] || {}) };
+      if (value === 'inherit') {
+        delete userMap[subId];
+      } else {
+        userMap[subId] = value;
+      }
+      if (Object.keys(userMap).length === 0) {
+        delete nextOverrides[targetUser.id];
+      } else {
+        nextOverrides[targetUser.id] = userMap;
+      }
+
+      const nextEmailOverrides = { ...(prev.visibility.equiposSubTabUserOverridesByEmail || {}) };
+      if (emailKey) {
+        const emailMap = { ...(nextEmailOverrides[emailKey] || {}) };
+        if (value === 'inherit') {
+          delete emailMap[subId];
+        } else {
+          emailMap[subId] = value;
+        }
+        if (Object.keys(emailMap).length === 0) {
+          delete nextEmailOverrides[emailKey];
+        } else {
+          nextEmailOverrides[emailKey] = emailMap;
+        }
+      }
+
+      return {
+        ...prev,
+        visibility: {
+          ...prev.visibility,
+          equiposSubTabUserOverrides: nextOverrides,
+          equiposSubTabUserOverridesByEmail: nextEmailOverrides,
+        },
+      };
+    });
+  };
+
   const handleClearUserOverrides = (targetUser: UserProfile) => {
     soundAlert.playFeedbackBeep();
     const emailKey = normalizeEmailOverrideKey(targetUser.email);
@@ -306,12 +404,22 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
       if (emailKey) {
         delete nextEmailOverrides[emailKey];
       }
+
+      const nextSubOverrides = { ...(prev.visibility.equiposSubTabUserOverrides || {}) };
+      delete nextSubOverrides[targetUser.id];
+      const nextSubEmailOverrides = { ...(prev.visibility.equiposSubTabUserOverridesByEmail || {}) };
+      if (emailKey) {
+        delete nextSubEmailOverrides[emailKey];
+      }
+
       return {
         ...prev,
         visibility: {
           ...prev.visibility,
           userOverrides: nextOverrides,
           userOverridesByEmail: nextEmailOverrides,
+          equiposSubTabUserOverrides: nextSubOverrides,
+          equiposSubTabUserOverridesByEmail: nextSubEmailOverrides,
         },
       };
     });
@@ -844,6 +952,93 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                 </tbody>
               </table>
             </div>
+
+            {/* Sub-windows of Equipos y Arriendos by Role */}
+            <div className="pt-4 border-t border-slate-800 space-y-3">
+              <div>
+                <h3 className="text-sm font-bold text-cyan-300 flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-cyan-400" />
+                  Sub-ventanas de Equipos y Arriendos (Por Rol)
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Controla quién puede ver cada pestaña interna dentro del módulo Equipos y Arriendos.
+                </p>
+              </div>
+
+              <div className="overflow-x-auto border border-slate-800 rounded-xl">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="px-4 py-2.5">Sub-ventana</th>
+                      <th className="px-4 py-2.5 text-center">Administrador</th>
+                      <th className="px-4 py-2.5 text-center">Operador (Normal)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/80">
+                    {EQUIPOS_SUB_WINDOWS.map((sub) => {
+                      const subPerms = draftConfig.visibility.equiposSubTabRolePermissions;
+                      const adminSubVisible = subPerms?.admin?.[sub.id] ?? true;
+                      const opSubVisible = subPerms?.operador?.[sub.id] ?? true;
+
+                      return (
+                        <tr key={sub.id} className="hover:bg-slate-800/30 transition-colors">
+                          <td className="px-4 py-2.5">
+                            <span className="font-bold text-white block">{sub.label}</span>
+                            <span className="text-[11px] text-slate-400">{sub.description}</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleEquiposSubTabRole('admin', sub.id)}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold text-[11px] border transition-colors ${
+                                adminSubVisible
+                                  ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700 hover:bg-emerald-900/60'
+                                  : 'bg-rose-950/70 text-rose-300 border-rose-700 hover:bg-rose-900/60'
+                              }`}
+                            >
+                              {adminSubVisible ? (
+                                <>
+                                  <Unlock className="w-3.5 h-3.5" />
+                                  <span>Visible</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Lock className="w-3.5 h-3.5" />
+                                  <span>Bloqueada</span>
+                                </>
+                              )}
+                            </button>
+                          </td>
+                          <td className="px-4 py-2.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleEquiposSubTabRole('operador', sub.id)}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold text-[11px] border transition-colors ${
+                                opSubVisible
+                                  ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700 hover:bg-emerald-900/60'
+                                  : 'bg-rose-950/70 text-rose-300 border-rose-700 hover:bg-rose-900/60'
+                              }`}
+                            >
+                              {opSubVisible ? (
+                                <>
+                                  <Unlock className="w-3.5 h-3.5" />
+                                  <span>Visible</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Lock className="w-3.5 h-3.5" />
+                                  <span>Bloqueada</span>
+                                </>
+                              )}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
 
           {/* RIGHT: ROLE MANAGEMENT & PER-USER SPECIFIC WINDOW LOCKS / OVERRIDES */}
@@ -879,7 +1074,11 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                   const byEmailKeys = emailKey
                     ? Object.keys(draftConfig.visibility.userOverridesByEmail?.[emailKey] || {})
                     : [];
-                  const customCount = new Set([...byIdKeys, ...byEmailKeys]).size;
+                  const subByIdKeys = Object.keys(draftConfig.visibility.equiposSubTabUserOverrides?.[u.id] || {}).map((k) => `eq_${k}`);
+                  const subByEmailKeys = emailKey
+                    ? Object.keys(draftConfig.visibility.equiposSubTabUserOverridesByEmail?.[emailKey] || {}).map((k) => `eq_${k}`)
+                    : [];
+                  const customCount = new Set([...byIdKeys, ...byEmailKeys, ...subByIdKeys, ...subByEmailKeys]).size;
 
                   return (
                     <button
@@ -1075,6 +1274,85 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                       </div>
                     );
                   })}
+
+                  {/* Sub-windows of Equipos y Arriendos per User */}
+                  <div className="pt-3 mt-2 border-t border-slate-800/80 space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 block px-1">
+                      Sub-ventanas de Equipos y Arriendos
+                    </span>
+                    {EQUIPOS_SUB_WINDOWS.map((sub) => {
+                      const roleKey = activeTargetUser.role === 'admin' ? 'admin' : 'operador';
+                      const roleDefault =
+                        draftConfig.visibility.equiposSubTabRolePermissions?.[roleKey]?.[sub.id] ?? true;
+                      const activeEmailKey = normalizeEmailOverrideKey(activeTargetUser.email);
+                      const byIdVal =
+                        draftConfig.visibility.equiposSubTabUserOverrides?.[activeTargetUser.id]?.[sub.id];
+                      const byEmailVal = activeEmailKey
+                        ? draftConfig.visibility.equiposSubTabUserOverridesByEmail?.[activeEmailKey]?.[sub.id]
+                        : undefined;
+                      const currentSubOverride: WindowOverrideValue =
+                        (byIdVal && byIdVal !== 'inherit' ? byIdVal : byEmailVal) || 'inherit';
+
+                      return (
+                        <div
+                          key={sub.id}
+                          className="p-2.5 rounded-lg bg-slate-900/60 border border-cyan-950/60 flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0">
+                            <span className="text-xs font-semibold text-slate-200 block truncate">
+                              {sub.label}
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              Por rol: {roleDefault ? 'Visible' : 'Bloqueada'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0 text-[10px] font-bold">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleUserEquiposSubTabOverride(activeTargetUser, sub.id, 'inherit')
+                              }
+                              className={`px-2 py-1 rounded border transition-colors ${
+                                currentSubOverride === 'inherit'
+                                  ? 'bg-slate-700 text-white border-slate-500'
+                                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                              }`}
+                            >
+                              Rol
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleUserEquiposSubTabOverride(activeTargetUser, sub.id, 'allow')
+                              }
+                              className={`px-2 py-1 rounded border transition-colors ${
+                                currentSubOverride === 'allow'
+                                  ? 'bg-emerald-600 text-white border-emerald-400'
+                                  : 'bg-slate-950 text-emerald-400/70 border-slate-800 hover:text-emerald-300'
+                              }`}
+                            >
+                              Ver
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleUserEquiposSubTabOverride(activeTargetUser, sub.id, 'block')
+                              }
+                              className={`px-2 py-1 rounded border flex items-center gap-1 transition-colors ${
+                                currentSubOverride === 'block'
+                                  ? 'bg-rose-600 text-white border-rose-400'
+                                  : 'bg-slate-950 text-rose-400/70 border-slate-800 hover:text-rose-300'
+                              }`}
+                            >
+                              <Lock className="w-2.5 h-2.5" />
+                              <span>Bloquear</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             ) : (

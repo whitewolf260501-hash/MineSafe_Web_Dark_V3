@@ -1281,6 +1281,8 @@ export default function App() {
                 rentals={rentals}
                 assignments={assignments}
                 devices={visibleDevices}
+                currentUser={currentUser}
+                platformConfig={platformConfig}
                 onAddAssignment={handleAddAssignment}
                 onAddRentalContract={handleAddRentalContract}
                 onRecordPayment={handleRecordPayment}

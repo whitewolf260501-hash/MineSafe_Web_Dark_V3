@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Cpu, 
   Users, 
@@ -17,32 +17,62 @@ import {
   Phone,
   Shield,
   Download,
+  Lock,
   X
 } from 'lucide-react';
-import { DeviceRental, WorkerAssignment, SensorDevice } from '../types';
+import {
+  DeviceRental,
+  WorkerAssignment,
+  SensorDevice,
+  UserProfile,
+  PlatformConfig,
+  EquiposSubTab
+} from '../types';
 import { soundAlert } from '../services/audioAlert';
+import { isEquiposSubTabVisibleForUser } from '../services/firebase';
 
 interface DevicesAndRentalsViewProps {
   rentals: DeviceRental[];
   assignments: WorkerAssignment[];
   devices: SensorDevice[];
+  currentUser?: UserProfile | null;
+  platformConfig?: PlatformConfig;
   onAddAssignment: (assignment: Omit<WorkerAssignment, 'id'>) => void;
   onAddRentalContract: (contract: Omit<DeviceRental, 'id'>) => void;
   onRecordPayment: (contractId: string) => void;
 }
 
+const EQUIPOS_SUBTAB_ORDER: EquiposSubTab[] = ['asignaciones', 'arriendos', 'pagos', 'inventario'];
+
 export const DevicesAndRentalsView: React.FC<DevicesAndRentalsViewProps> = ({
   rentals,
   assignments,
   devices,
+  currentUser = null,
+  platformConfig,
   onAddAssignment,
   onAddRentalContract,
   onRecordPayment,
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'asignaciones' | 'arriendos' | 'pagos' | 'inventario'>('asignaciones');
+  const [activeSubTab, setActiveSubTab] = useState<EquiposSubTab>('asignaciones');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showNewContractModal, setShowNewContractModal] = useState(false);
+
+  const allowedSubTabs = useMemo<EquiposSubTab[]>(() => {
+    if (!currentUser) return EQUIPOS_SUBTAB_ORDER;
+    return EQUIPOS_SUBTAB_ORDER.filter((tab) =>
+      isEquiposSubTabVisibleForUser(tab, currentUser, platformConfig)
+    );
+  }, [currentUser, platformConfig]);
+
+  useEffect(() => {
+    if (allowedSubTabs.length > 0 && !allowedSubTabs.includes(activeSubTab)) {
+      setActiveSubTab(allowedSubTabs[0]);
+    }
+  }, [allowedSubTabs, activeSubTab]);
+
+  const canViewSubTab = (subTab: EquiposSubTab) => allowedSubTabs.includes(subTab);
 
   // New assignment form state
   const [newWorkerName, setNewWorkerName] = useState('');
@@ -161,7 +191,7 @@ export const DevicesAndRentalsView: React.FC<DevicesAndRentalsViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {activeSubTab === 'asignaciones' && (
+            {activeSubTab === 'asignaciones' && canViewSubTab('asignaciones') && (
               <button
                 onClick={() => setShowAssignModal(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition-colors"
@@ -171,7 +201,8 @@ export const DevicesAndRentalsView: React.FC<DevicesAndRentalsViewProps> = ({
               </button>
             )}
 
-            {(activeSubTab === 'arriendos' || activeSubTab === 'pagos') && (
+            {((activeSubTab === 'arriendos' && canViewSubTab('arriendos')) ||
+              (activeSubTab === 'pagos' && canViewSubTab('pagos'))) && (
               <button
                 onClick={() => setShowNewContractModal(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition-colors"
@@ -185,60 +216,80 @@ export const DevicesAndRentalsView: React.FC<DevicesAndRentalsViewProps> = ({
 
         {/* Sub Navigation Tabs */}
         <div className="flex flex-wrap items-center gap-2 pt-6 border-t border-slate-800/80 mt-6">
-          <button
-            onClick={() => setActiveSubTab('asignaciones')}
-            className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeSubTab === 'asignaciones'
-                ? 'bg-slate-800 text-cyan-300 border border-slate-700'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            <span>Asignaciones a Cuadrillas ({assignments.length})</span>
-          </button>
+          {canViewSubTab('asignaciones') && (
+            <button
+              onClick={() => setActiveSubTab('asignaciones')}
+              className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeSubTab === 'asignaciones'
+                  ? 'bg-slate-800 text-cyan-300 border border-slate-700'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>Asignaciones a Cuadrillas ({assignments.length})</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveSubTab('arriendos')}
-            className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeSubTab === 'arriendos'
-                ? 'bg-slate-800 text-cyan-300 border border-slate-700'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-            <span>Contratos de Arriendo ({rentals.length})</span>
-          </button>
+          {canViewSubTab('arriendos') && (
+            <button
+              onClick={() => setActiveSubTab('arriendos')}
+              className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeSubTab === 'arriendos'
+                  ? 'bg-slate-800 text-cyan-300 border border-slate-700'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              }`}
+            >
+              <FileText className="w-4 h-4" />
+              <span>Contratos de Arriendo ({rentals.length})</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveSubTab('pagos')}
-            className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeSubTab === 'pagos'
-                ? 'bg-slate-800 text-cyan-300 border border-slate-700'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`}
-          >
-            <CreditCard className="w-4 h-4" />
-            <span>Estado de Pagos y Facturas</span>
-          </button>
+          {canViewSubTab('pagos') && (
+            <button
+              onClick={() => setActiveSubTab('pagos')}
+              className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeSubTab === 'pagos'
+                  ? 'bg-slate-800 text-cyan-300 border border-slate-700'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              }`}
+            >
+              <CreditCard className="w-4 h-4" />
+              <span>Estado de Pagos y Facturas</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setActiveSubTab('inventario')}
-            className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeSubTab === 'inventario'
-                ? 'bg-slate-800 text-cyan-300 border border-slate-700'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`}
-          >
-            <Cpu className="w-4 h-4" />
-            <span>Stock de Sensores IoT ({devices.length})</span>
-          </button>
+          {canViewSubTab('inventario') && (
+            <button
+              onClick={() => setActiveSubTab('inventario')}
+              className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeSubTab === 'inventario'
+                  ? 'bg-slate-800 text-cyan-300 border border-slate-700'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              }`}
+            >
+              <Cpu className="w-4 h-4" />
+              <span>Stock de Sensores IoT ({devices.length})</span>
+            </button>
+          )}
         </div>
       </div>
 
+      {allowedSubTabs.length === 0 ? (
+        <div className="p-8 text-center bg-slate-900/80 border border-red-900/50 rounded-2xl max-w-xl mx-auto my-8 shadow-xl">
+          <Lock className="w-10 h-10 text-red-400 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-white mb-1.5">
+            Sub-ventanas Bloqueadas por el SuperAdministrador
+          </h2>
+          <p className="text-slate-400 text-xs sm:text-sm">
+            Todas las secciones de Equipos y Arriendos han sido restringidas para tu usuario o rol.
+          </p>
+        </div>
+      ) : (
+        <>
       {/* ==============================================================
           SUBTAB 1: ASIGNACIONES A TRABAJADORES
          ============================================================== */}
-      {activeSubTab === 'asignaciones' && (
+      {activeSubTab === 'asignaciones' && canViewSubTab('asignaciones') && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {assignments.map((item) => (
@@ -299,7 +350,7 @@ export const DevicesAndRentalsView: React.FC<DevicesAndRentalsViewProps> = ({
       {/* ==============================================================
           SUBTAB 2: CONTRATOS DE ARRIENDO
          ============================================================== */}
-      {activeSubTab === 'arriendos' && (
+      {activeSubTab === 'arriendos' && canViewSubTab('arriendos') && (
         <div className="space-y-4">
           <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
@@ -342,7 +393,7 @@ export const DevicesAndRentalsView: React.FC<DevicesAndRentalsViewProps> = ({
       {/* ==============================================================
           SUBTAB 3: PAGOS Y FACTURACIÓN
          ============================================================== */}
-      {activeSubTab === 'pagos' && (
+      {activeSubTab === 'pagos' && canViewSubTab('pagos') && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {rentals.map((rental) => (
@@ -403,7 +454,7 @@ export const DevicesAndRentalsView: React.FC<DevicesAndRentalsViewProps> = ({
       {/* ==============================================================
           SUBTAB 4: INVENTARIO DE SENSORES
          ============================================================== */}
-      {activeSubTab === 'inventario' && (
+      {activeSubTab === 'inventario' && canViewSubTab('inventario') && (
         <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
@@ -447,6 +498,8 @@ export const DevicesAndRentalsView: React.FC<DevicesAndRentalsViewProps> = ({
             </table>
           </div>
         </div>
+      )}
+        </>
       )}
 
       {/* MODAL: NUEVA ASIGNACIÓN */}

@@ -42,6 +42,7 @@ import {
   AlertEventRecord,
   AlarmAuditRecord,
   ControllableTab,
+  EquiposSubTab,
   NavigationTab,
   PlatformConfig,
   WindowOverrideValue,
@@ -1670,6 +1671,22 @@ export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
     },
     userOverrides: {},
     userOverridesByEmail: {},
+    equiposSubTabRolePermissions: {
+      admin: {
+        asignaciones: true,
+        arriendos: true,
+        pagos: true,
+        inventario: true,
+      },
+      operador: {
+        asignaciones: true,
+        arriendos: true,
+        pagos: true,
+        inventario: true,
+      },
+    },
+    equiposSubTabUserOverrides: {},
+    equiposSubTabUserOverridesByEmail: {},
   },
   metrics: {
     coPreventivo: 300,
@@ -1777,6 +1794,39 @@ export function isTabVisibleForUser(
   return DEFAULT_PLATFORM_CONFIG.visibility.rolePermissions[roleKey][controllableTab];
 }
 
+export function isEquiposSubTabVisibleForUser(
+  subTab: EquiposSubTab,
+  user: UserProfile | null,
+  config?: PlatformConfig | null
+): boolean {
+  if (!user) return false;
+  if (user.role === 'superadmin') {
+    return true;
+  }
+
+  const emailKey = normalizeEmailOverrideKey(user.email);
+  const byIdOverride: WindowOverrideValue | undefined =
+    config?.visibility?.equiposSubTabUserOverrides?.[user.id]?.[subTab];
+  const byEmailOverride: WindowOverrideValue | undefined =
+    emailKey ? config?.visibility?.equiposSubTabUserOverridesByEmail?.[emailKey]?.[subTab] : undefined;
+
+  const userOverride: WindowOverrideValue | undefined =
+    byIdOverride && byIdOverride !== 'inherit'
+      ? byIdOverride
+      : byEmailOverride;
+
+  if (userOverride === 'allow') return true;
+  if (userOverride === 'block') return false;
+
+  const roleKey = user.role === 'admin' ? 'admin' : 'operador';
+  const configuredRoleVal = config?.visibility?.equiposSubTabRolePermissions?.[roleKey]?.[subTab];
+  if (typeof configuredRoleVal === 'boolean') {
+    return configuredRoleVal;
+  }
+
+  return DEFAULT_PLATFORM_CONFIG.visibility.equiposSubTabRolePermissions![roleKey][subTab];
+}
+
 function mergePlatformConfig(raw: any): PlatformConfig {
   return {
     visibility: {
@@ -1792,6 +1842,18 @@ function mergePlatformConfig(raw: any): PlatformConfig {
       },
       userOverrides: raw?.visibility?.userOverrides || {},
       userOverridesByEmail: raw?.visibility?.userOverridesByEmail || {},
+      equiposSubTabRolePermissions: {
+        admin: {
+          ...DEFAULT_PLATFORM_CONFIG.visibility.equiposSubTabRolePermissions!.admin,
+          ...(raw?.visibility?.equiposSubTabRolePermissions?.admin || {}),
+        },
+        operador: {
+          ...DEFAULT_PLATFORM_CONFIG.visibility.equiposSubTabRolePermissions!.operador,
+          ...(raw?.visibility?.equiposSubTabRolePermissions?.operador || {}),
+        },
+      },
+      equiposSubTabUserOverrides: raw?.visibility?.equiposSubTabUserOverrides || {},
+      equiposSubTabUserOverridesByEmail: raw?.visibility?.equiposSubTabUserOverridesByEmail || {},
     },
     metrics: {
       ...DEFAULT_PLATFORM_CONFIG.metrics,
