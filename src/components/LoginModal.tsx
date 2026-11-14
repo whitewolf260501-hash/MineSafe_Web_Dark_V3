@@ -17,10 +17,15 @@ import {
   Activity,
   ShieldCheck,
   ShieldAlert,
-  Fingerprint
+  Fingerprint,
+  Loader2
 } from 'lucide-react';
-import { UserProfile, UserRole } from '../types';
-import { PRELOADED_USERS } from '../data/mockData';
+import { UserProfile } from '../types';
+import { 
+  loginWithFirebaseAuth,
+  registerWithFirebaseAuth,
+  sendPasswordResetWithFirebase
+} from '../services/firebase';
 import { soundAlert } from '../services/audioAlert';
 
 interface LoginModalProps {
@@ -55,158 +60,127 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [hideQuickProfiles, setHideQuickProfiles] = useState(false);
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   // Register Form State
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [showRegPassword, setShowRegPassword] = useState(false);
   const [regRut, setRegRut] = useState('');
-  const [regRole, setRegRole] = useState<UserRole>('operador');
   const [regShift, setRegShift] = useState('Turno Mañana (07:00 - 15:30)');
 
-  // Known default passwords/PINs for real profiles (can be customized)
-  const validatePasswordForProfile = (targetUser: UserProfile, inputPass: string): boolean => {
-    const pass = inputPass.trim();
-    if (!pass) return false;
-
-    // SuperAdmin (Manuel Crisostomo - Único en la plataforma)
-    if (targetUser.role === 'superadmin' || targetUser.email.toLowerCase() === 'manuelcrisostomovega@gmail.com') {
-      const valid = ['admin123', 'minesafe2025', '123456', 'superadmin', 'manuel2025', 'admin'];
-      return valid.includes(pass) || pass.length >= 6;
-    }
-
-    // Admin (PEPE LOTA)
-    if (targetUser.role === 'admin' || targetUser.email.includes('white.wolf')) {
-      const valid = ['admin123', 'minesafe2025', '123456', 'admin', 'pepe2025'];
-      return valid.includes(pass) || pass.length >= 4;
-    }
-
-    // Operador (Gerardo Cuellar and others)
-    const valid = ['operador123', '1234', '123456', 'minesafe2025', 'operador'];
-    return valid.includes(pass) || pass.length >= 4;
-  };
-
-  // When clicking on a quick profile card:
-  // Requires password to prevent impersonation!
+  // When clicking on a quick profile card: fills email only and requires real Firebase Auth password
   const handleSelectQuickProfile = (targetUser: UserProfile) => {
     setSelectedProfileForAuth(targetUser);
     setEmail(targetUser.email);
     setPassword('');
     setErrorMessage('');
+    setSuccessMessage('');
     soundAlert.playFeedbackBeep();
 
-    // Focus password input for user to type their key
     setTimeout(() => {
       passwordInputRef.current?.focus();
     }, 100);
   };
 
-  // Submit login with credentials validation
-  const handleSubmitLogin = (e: React.FormEvent) => {
+  // Submit login strictly via Firebase Authentication signInWithEmailAndPassword
+  const handleSubmitLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
-    
-    const cleanEmail = email.trim().toLowerCase();
+    setSuccessMessage('');
+
+    const cleanEmail = email.trim();
     if (!cleanEmail) {
       setErrorMessage('Por favor ingrese su correo electrónico corporativo.');
       return;
     }
 
-    if (!password.trim()) {
+    if (!password) {
       soundAlert.playFeedbackBeep();
-      setErrorMessage('Por seguridad (DS 132), debe ingresar su contraseña para autenticar su acceso.');
+      setErrorMessage('Por seguridad (DS 132), debe ingresar su contraseña de Firebase Auth.');
       passwordInputRef.current?.focus();
       return;
     }
 
-    // Find matched user
-    const matchedUser = selectedProfileForAuth || usersList.find(u => u.email.toLowerCase() === cleanEmail);
-    
-    if (matchedUser) {
-      // Validate password
-      const isValid = validatePasswordForProfile(matchedUser, password);
-      
-      if (!isValid) {
-        soundAlert.playFeedbackBeep();
-        setErrorMessage(`Contraseña incorrecta para el perfil de ${matchedUser.name}. Acceso denegado por seguridad minera.`);
-        return;
-      }
-
-      // Successful login
-      onLogin(matchedUser);
+    setIsSubmitting(true);
+    try {
+      const authenticatedUser = await loginWithFirebaseAuth(cleanEmail, password, rememberMe);
       soundAlert.playFeedbackBeep();
+      onLogin(authenticatedUser);
       if (!isGateMode) onClose();
-    } else {
-      // Create session for entered corporate email with minimum password check
-      if (password.length < 4) {
-        setErrorMessage('La contraseña debe tener al menos 4 caracteres.');
-        return;
-      }
-
-      // Solo la cuenta canónica única puede acceder como superadmin; cualquier otro correo nuevo inicia como operador
-      const isCanonicalSuper = cleanEmail === 'manuelcrisostomovega@gmail.com';
-      const customUser: UserProfile = {
-        id: isCanonicalSuper ? 'manual_temp_uid_01' : `usr-${Date.now()}`,
-        name: isCanonicalSuper ? 'Manuel Crisostomo' : cleanEmail.split('@')[0].toUpperCase(),
-        email: cleanEmail,
-        role: isCanonicalSuper ? 'superadmin' : 'operador',
-        roleLabel: isCanonicalSuper ? 'Super Administrador' : 'Usuario Normal / Operador',
-        rut: '18.921.432-5',
-        shift: 'Turno A',
-        status: 'activo',
-        lastLogin: 'Ahora',
-        assignedSector: 'Faena Minera Central',
-        assignedDeviceCode: isCanonicalSuper ? 'device_38A839E81F84' : 'MS-PORT-01',
-      };
-      onLogin(customUser);
+    } catch (err: any) {
       soundAlert.playFeedbackBeep();
-      if (!isGateMode) onClose();
+      setErrorMessage(err?.message || 'Credenciales inválidas en Firebase Authentication. Acceso denegado.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // Submit registration form
-  const handleSubmitRegister = (e: React.FormEvent) => {
+  // Submit registration strictly via Firebase Authentication createUserWithEmailAndPassword
+  const handleSubmitRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!regName || !regEmail) {
-      setErrorMessage('Todos los campos son obligatorios.');
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    if (!regName.trim() || !regEmail.trim() || !regPassword) {
+      setErrorMessage('Nombre, correo electrónico y contraseña (mínimo 6 caracteres) son obligatorios.');
+      return;
+    }
+    if (regPassword.length < 6) {
+      setErrorMessage('La contraseña de Firebase Authentication debe tener al menos 6 caracteres.');
       return;
     }
 
-    // Por protocolo de seguridad DS 132, todo nuevo registro inicia obligatoriamente como Operador (Usuario Normal)
-    const newUser: UserProfile = {
-      id: `usr-${Date.now()}`,
-      name: regName.trim(),
-      email: regEmail.trim(),
-      role: 'operador',
-      roleLabel: 'Usuario Normal / Operador de Faena',
-      rut: regRut || '17.654.321-K',
-      shift: regShift,
-      status: 'activo',
-      lastLogin: 'Ahora',
-      assignedSector: 'Faena Minera Central',
-      assignedDeviceCode: '',
-    };
-
-    onRegisterUser(newUser);
-    onLogin(newUser);
-    soundAlert.playFeedbackBeep();
-    setSuccessMessage('Cuenta creada exitosamente con rol Operador. Solo un Administrador o SuperAdmin puede otorgar credenciales superiores.');
-    if (!isGateMode) {
-      setTimeout(() => onClose(), 1200);
+    setIsSubmitting(true);
+    try {
+      const createdUser = await registerWithFirebaseAuth(
+        regName,
+        regEmail,
+        regPassword,
+        regRut,
+        regShift
+      );
+      onRegisterUser(createdUser);
+      onLogin(createdUser);
+      soundAlert.playFeedbackBeep();
+      setSuccessMessage('Cuenta verificada y creada en Firebase Authentication con rol Operador.');
+      if (!isGateMode) {
+        setTimeout(() => onClose(), 1000);
+      }
+    } catch (err: any) {
+      soundAlert.playFeedbackBeep();
+      setErrorMessage(err?.message || 'No se pudo registrar la cuenta en Firebase Authentication.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // Submit password recovery
-  const handleSubmitRecover = (e: React.FormEvent) => {
+  // Submit password recovery via Firebase Authentication
+  const handleSubmitRecover = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) {
-      setErrorMessage('Ingrese su correo corporativo.');
+    setErrorMessage('');
+    setSuccessMessage('');
+    if (!email.trim()) {
+      setErrorMessage('Ingrese su correo corporativo registrado en Firebase Auth.');
       return;
     }
-    soundAlert.playFeedbackBeep();
-    setSuccessMessage(`Se ha enviado un enlace de restablecimiento a ${email}.`);
-    setTimeout(() => {
-      setActiveTab('login');
-      setSuccessMessage('');
-    }, 2500);
+
+    setIsSubmitting(true);
+    try {
+      await sendPasswordResetWithFirebase(email);
+      soundAlert.playFeedbackBeep();
+      setSuccessMessage(`Se ha enviado un enlace de restablecimiento de Firebase Auth a ${email.trim()}.`);
+      setTimeout(() => {
+        setActiveTab('login');
+        setSuccessMessage('');
+      }, 2500);
+    } catch (err: any) {
+      soundAlert.playFeedbackBeep();
+      setErrorMessage(err?.message || 'No se pudo enviar el correo de recuperación.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Find the 3 featured real accounts from RTDB
@@ -252,7 +226,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>Acceso Protegido: Requiere contraseña para validar identidad.</span>
+            <span>Validación estricta con Firebase Authentication (Email y Contraseña).</span>
           </div>
           <button
             type="button"
@@ -542,10 +516,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
             <button
               type="submit"
-              className="w-full py-2.5 px-4 text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition-colors shadow-md shadow-cyan-950 flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isSubmitting}
+              className="w-full py-2.5 px-4 text-xs font-bold bg-cyan-600 hover:bg-cyan-500 disabled:bg-cyan-900 disabled:text-cyan-300 text-white rounded-lg transition-colors shadow-md shadow-cyan-950 flex items-center justify-center gap-2 cursor-pointer"
             >
-              <Fingerprint className="w-4 h-4" />
-              <span>Verificar Identidad e Ingresar</span>
+              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Fingerprint className="w-4 h-4" />}
+              <span>{isSubmitting ? 'Validando en Firebase Auth...' : 'Verificar Identidad e Ingresar'}</span>
             </button>
           </form>
 
@@ -579,6 +554,29 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               onChange={(e) => setRegEmail(e.target.value)}
               className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-500"
             />
+          </div>
+
+          <div>
+            <label className="text-slate-300 block mb-1">Contraseña (mínimo 6 caracteres)</label>
+            <div className="relative">
+              <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+              <input
+                type={showRegPassword ? 'text' : 'password'}
+                required
+                minLength={6}
+                placeholder="Mínimo 6 caracteres..."
+                value={regPassword}
+                onChange={(e) => setRegPassword(e.target.value)}
+                className="w-full pl-9 pr-9 py-2 bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+              />
+              <button
+                type="button"
+                onClick={() => setShowRegPassword(!showRegPassword)}
+                className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300"
+              >
+                {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -629,9 +627,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
           <button
             type="submit"
-            className="w-full py-2.5 px-3 text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition-colors mt-2"
+            disabled={isSubmitting}
+            className="w-full py-2.5 px-3 text-xs font-bold bg-cyan-600 hover:bg-cyan-500 disabled:bg-cyan-900 text-white rounded-lg transition-colors mt-2 flex items-center justify-center gap-2"
           >
-            Crear Cuenta y Conectar a Firebase
+            {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+            <span>{isSubmitting ? 'Registrando en Firebase Auth...' : 'Crear Cuenta en Firebase Auth'}</span>
           </button>
         </form>
       )}
@@ -657,9 +657,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </div>
           <button
             type="submit"
-            className="w-full py-2.5 px-3 text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition-colors"
+            disabled={isSubmitting}
+            className="w-full py-2.5 px-3 text-xs font-bold bg-cyan-600 hover:bg-cyan-500 disabled:bg-cyan-900 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
           >
-            Enviar Enlace de Recuperación
+            {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+            <span>{isSubmitting ? 'Enviando enlace...' : 'Enviar Enlace de Recuperación'}</span>
           </button>
         </form>
       )}

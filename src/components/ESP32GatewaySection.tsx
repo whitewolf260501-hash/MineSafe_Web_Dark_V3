@@ -29,12 +29,13 @@ import {
   Download,
   Lock
 } from 'lucide-react';
-import { SensorDevice } from '../types';
+import { SensorDevice, UserProfile } from '../types';
 import { 
   sendESP32Command, 
   resetGatewayDataInRTDB, 
   toggleGatewayAlarmInRTDB, 
-  toggleGatewayLightInRTDB 
+  toggleGatewayLightInRTDB,
+  verifySuperAdminPrivileges
 } from '../services/firebase';
 import { soundAlert } from '../services/audioAlert';
 
@@ -44,11 +45,12 @@ interface ESP32GatewaySectionProps {
   onSelectDevice: (deviceId: string) => void;
   onResetPageLevels?: () => void;
   isAlarmActive?: boolean;
-  onToggleAlarm?: () => void;
-  onShutdownAlarmCompletely?: () => void;
+  onToggleAlarm?: () => Promise<void> | void;
+  onShutdownAlarmCompletely?: () => Promise<void> | void;
   isLightActive?: boolean;
   onToggleLight?: () => void;
   isSuperAdmin?: boolean;
+  currentUser?: UserProfile | null;
 }
 
 export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
@@ -62,6 +64,7 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
   isLightActive = false,
   onToggleLight,
   isSuperAdmin = false,
+  currentUser = null,
 }) => {
   const [localIp, setLocalIp] = useState('192.168.4.1');
   const [isEditingIp, setIsEditingIp] = useState(false);
@@ -162,17 +165,20 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
   // 2. Resetear datos del Gateway (Firebase RTDB)
   const handleResetGatewayData = async () => {
     if (!currentDevice) return;
-    if (effectiveAlarmActive && !isSuperAdmin) {
-      showNotification('Acción bloqueada: Solo el SuperAdministrador puede apagar la alarma y resetear el Gateway.');
-      return;
+    if (effectiveAlarmActive) {
+      const verifiedSuper = isSuperAdmin && await verifySuperAdminPrivileges(currentUser);
+      if (!verifiedSuper) {
+        showNotification('Acción bloqueada: Solo el SuperAdministrador autenticado puede apagar la alarma y resetear el Gateway.');
+        return;
+      }
     }
     setIsResettingGateway(true);
     soundAlert.playFeedbackBeep();
     try {
-      await resetGatewayDataInRTDB(currentDevice.id);
-      showNotification(`Datos del Gateway (${currentDevice.id}) reseteados en Firebase RTDB a valores basales limpios.`);
-    } catch {
-      showNotification('Error al resetear datos en Firebase.');
+      await resetGatewayDataInRTDB(currentDevice.id, currentUser);
+      showNotification(`Datos del Gateway (${currentDevice.id}) reseteados y comando_web="APAGAR" enviado a RTDB.`);
+    } catch (err: any) {
+      showNotification(err?.message || 'Error al resetear datos en Firebase RTDB.');
     } finally {
       setIsResettingGateway(false);
     }
@@ -208,25 +214,33 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
         return;
       }
       if (onShutdownAlarmCompletely) {
-        onShutdownAlarmCompletely();
-        showNotification('Alarma apagada completamente (sirena web, baliza y Firebase RTDB) por SuperAdmin.');
+        await onShutdownAlarmCompletely();
         return;
       }
     }
     if (onToggleAlarm) {
-      onToggleAlarm();
-    } else {
-      const nextState = !effectiveAlarmActive;
+      await onToggleAlarm();
+      return;
+    }
+
+    const nextState = !effectiveAlarmActive;
+    try {
+      if (currentDevice) {
+        await toggleGatewayAlarmInRTDB(currentDevice.id, nextState, currentUser);
+      }
       if (nextState) {
         soundAlert.setMuted(false);
         soundAlert.startContinuousAlarm();
       } else {
         soundAlert.stopContinuousAlarm();
       }
-      if (currentDevice) {
-        await toggleGatewayAlarmInRTDB(currentDevice.id, nextState);
-      }
-      showNotification(nextState ? '¡Alarma sonora y baliza ACTIVADAS!' : 'Alarma silenciada y desactivada.');
+      showNotification(
+        nextState
+          ? `Alarma activada: comando_web="ENCENDER" enviado a /dispositivos/${currentDevice?.id}.`
+          : `Alarma apagada: comando_web="APAGAR" y silencio_remoto=true enviados a /dispositivos/${currentDevice?.id}.`
+      );
+    } catch (err: any) {
+      showNotification(err?.message || 'Error al enviar comando de alarma a Firebase RTDB.');
     }
   };
 

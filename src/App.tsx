@@ -61,7 +61,10 @@ import {
   saveDrillDebriefInRTDB,
   DEFAULT_PLATFORM_CONFIG,
   subscribeToPlatformConfig,
-  isTabVisibleForUser
+  isTabVisibleForUser,
+  subscribeToFirebaseAuth,
+  logoutFromFirebaseAuth,
+  verifySuperAdminPrivileges
 } from './services/firebase';
 
 import { soundAlert } from './services/audioAlert';
@@ -105,15 +108,8 @@ export default function App() {
   const [sites, setSites] = useState<MiningSite[]>(MINING_SITES);
   const [currentSite, setCurrentSite] = useState<MiningSite>(MINING_SITES[0]);
   const [usersList, setUsersList] = useState<UserProfile[]>(PRELOADED_USERS);
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
-    try {
-      const saved = localStorage.getItem('minesafe_active_user');
-      if (saved) return JSON.parse(saved);
-    } catch {
-      return null;
-    }
-    return null;
-  });
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
 
   const [selectedSensorId, setSelectedSensorId] = useState<string | null>(null);
   const [activeTelemetryDeviceId, setActiveTelemetryDeviceId] = useState<string>('device_38A839E81F84');
@@ -134,7 +130,19 @@ export default function App() {
     setAlarmFeedback({ message, tone });
     setTimeout(() => {
       setAlarmFeedback((prev) => (prev?.message === message ? null : prev));
-    }, 4500);
+    }, 5000);
+  }, []);
+
+  // Strict Firebase Authentication session listener (never trust localStorage alone)
+  useEffect(() => {
+    try {
+      localStorage.removeItem('minesafe_active_user');
+    } catch { /* ignore */ }
+    const unsubAuth = subscribeToFirebaseAuth((authenticatedUser) => {
+      setCurrentUser(authenticatedUser);
+      setIsAuthChecking(false);
+    });
+    return () => unsubAuth();
   }, []);
 
   // Initialize and connect to user's Firebase Realtime Database
@@ -157,20 +165,14 @@ export default function App() {
         }
       });
 
-      // Realtime listener for Users
+      // Realtime listener for Users (syncs role/status updates for already-authenticated Firebase Auth user)
       unsubUsers = subscribeToRTDBUsers((remoteUsers) => {
         if (remoteUsers && remoteUsers.length > 0) {
           setUsersList(remoteUsers);
           setCurrentUser((prev) => {
             if (!prev) return null;
             const updated = remoteUsers.find(u => u.id === prev.id || u.email.toLowerCase() === prev.email.toLowerCase());
-            if (updated) {
-              try {
-                localStorage.setItem('minesafe_active_user', JSON.stringify(updated));
-              } catch { /* ignore */ }
-              return updated;
-            }
-            return prev;
+            return updated || prev;
           });
         }
       });
@@ -596,67 +598,79 @@ export default function App() {
 
   const handleShutdownAlarmCompletely = useCallback(async () => {
     if (!currentUser || currentUser.role !== 'superadmin') {
-      showAlarmFeedback('Acceso denegado: Solo el usuario SuperAdministrador puede apagar la alarma completamente.', 'error');
+      showAlarmFeedback('Acceso denegado: Solo el usuario SuperAdministrador autenticado puede apagar la alarma completamente.', 'error');
+      return;
+    }
+
+    const isVerifiedSuper = await verifySuperAdminPrivileges(currentUser);
+    if (!isVerifiedSuper) {
+      showAlarmFeedback('Acceso denegado: Tu sesión de Firebase Auth no posee privilegios reales de SuperAdministrador.', 'error');
       return;
     }
 
     const wasDrill = isDrillActive;
-    soundAlert.stopContinuousAlarm();
-    soundAlert.playFeedbackBeep();
-    setIsAlarmActive(false);
-    setIsLightActive(false);
-    setIsDrillActive(false);
-    setDrillType(null);
-    setEvacuationActive(false);
-    setDismissEmergencyBanner(true);
-
-    setAlerts(prev => prev.map(a => ({ ...a, resolved: true, acknowledged: true })));
-    setDevices(prev => prev.map(d => d.id === activeTelemetryDeviceId ? {
-      ...d,
-      alarmaActiva: false,
-      status: wasDrill ? 'normal' : d.status,
-      rawCO: wasDrill ? 45 : d.rawCO,
-      rawPM25: wasDrill ? 25 : d.rawPM25,
-      metrics: wasDrill
-        ? { ...d.metrics, co: 8.5, polvoPM: 25 }
-        : d.metrics,
-    } : d));
+    const targetId = activeTelemetryDeviceId || 'device_38A839E81F84';
 
     try {
-      await shutdownAlarmCompletelyInRTDB(activeTelemetryDeviceId, currentUser, {
+      await shutdownAlarmCompletelyInRTDB(targetId, currentUser, {
         resetSensorBaselines: wasDrill,
       });
-      showAlarmFeedback('Alarma sonora, baliza LED y estado de emergencia apagados completamente por SuperAdministrador.', 'success');
-    } catch {
-      showAlarmFeedback('No se pudo confirmar el apagado completo en Firebase RTDB.', 'error');
+
+      soundAlert.stopContinuousAlarm();
+      soundAlert.playFeedbackBeep();
+      setIsAlarmActive(false);
+      setIsLightActive(false);
+      setIsDrillActive(false);
+      setDrillType(null);
+      setEvacuationActive(false);
+      setDismissEmergencyBanner(true);
+
+      setAlerts(prev => prev.map(a => ({ ...a, resolved: true, acknowledged: true })));
+      setDevices(prev => prev.map(d => (d.id === targetId || d.id === 'device_38A839E81F84') ? {
+        ...d,
+        alarmaActiva: false,
+        status: wasDrill ? 'normal' : d.status,
+        rawCO: wasDrill ? 45 : d.rawCO,
+        rawPM25: wasDrill ? 25 : d.rawPM25,
+        metrics: wasDrill
+          ? { ...d.metrics, co: 8.5, polvoPM: 25 }
+          : d.metrics,
+      } : d));
+
+      showAlarmFeedback(`Alarma apagada: comando_web="APAGAR" y silencio_remoto=true escritos en /dispositivos/${targetId}.`, 'success');
+    } catch (err: any) {
+      showAlarmFeedback(err?.message || 'Error al escribir comando APAGAR en Firebase RTDB.', 'error');
     }
   }, [currentUser, isDrillActive, activeTelemetryDeviceId, showAlarmFeedback]);
 
   const handleResetPageLevels = useCallback(async () => {
     const dev = visibleDevices.find(d => d.id === activeTelemetryDeviceId) || visibleDevices[0];
     const hasActiveAlarm = Boolean(isAlarmActive || isDrillActive || dev?.alarmaActiva);
-    if (hasActiveAlarm && currentUser?.role !== 'superadmin') {
-      showAlarmFeedback('Acción bloqueada: Solo el SuperAdministrador puede apagar o resetear una alarma activa.', 'error');
-      return;
+    if (hasActiveAlarm) {
+      const isVerifiedSuper = currentUser?.role === 'superadmin' && await verifySuperAdminPrivileges(currentUser);
+      if (!isVerifiedSuper) {
+        showAlarmFeedback('Acción bloqueada: Solo el SuperAdministrador autenticado puede apagar o resetear una alarma activa.', 'error');
+        return;
+      }
     }
 
-    soundAlert.playFeedbackBeep();
-    soundAlert.stopContinuousAlarm();
-    setIsAlarmActive(false);
-    setIsLightActive(false);
-    setIsDrillActive(false);
-    setDrillType(null);
-    setEvacuationActive(false);
-    setDismissEmergencyBanner(true);
-    
-    // Clear and resolve all active alerts
-    setAlerts(prev => prev.map(a => ({ ...a, resolved: true, acknowledged: true })));
-    
-    // Reset variables to clean industrial baselines
-    setVariables(INITIAL_VARIABLES);
+    try {
+      await resetGatewayDataInRTDB(activeTelemetryDeviceId, currentUser);
+      soundAlert.playFeedbackBeep();
+      soundAlert.stopContinuousAlarm();
+      setIsAlarmActive(false);
+      setIsLightActive(false);
+      setIsDrillActive(false);
+      setDrillType(null);
+      setEvacuationActive(false);
+      setDismissEmergencyBanner(true);
 
-    // Reset node in Firebase RTDB
-    await resetGatewayDataInRTDB(activeTelemetryDeviceId, currentUser);
+      setAlerts(prev => prev.map(a => ({ ...a, resolved: true, acknowledged: true })));
+      setVariables(INITIAL_VARIABLES);
+      showAlarmFeedback('Niveles basales y comando APAGAR sincronizados en Firebase RTDB.', 'success');
+    } catch (err: any) {
+      showAlarmFeedback(err?.message || 'No se pudo resetear el nodo en Firebase RTDB.', 'error');
+    }
   }, [visibleDevices, activeTelemetryDeviceId, isAlarmActive, isDrillActive, currentUser, showAlarmFeedback]);
 
   const handleTriggerSimulationEmergency = useCallback(async (type: DrillType) => {
@@ -717,22 +731,26 @@ export default function App() {
   }, [visibleDevices, activeTelemetryDeviceId]);
 
   const handleStopDrill = useCallback(async () => {
-    if (!currentUser || currentUser.role !== 'superadmin') {
-      showAlarmFeedback('Acción bloqueada: Solo el SuperAdministrador puede finalizar un simulacro y apagar la alarma.', 'error');
+    const isVerifiedSuper = currentUser?.role === 'superadmin' && await verifySuperAdminPrivileges(currentUser);
+    if (!isVerifiedSuper) {
+      showAlarmFeedback('Acción bloqueada: Solo el SuperAdministrador autenticado puede finalizar un simulacro y apagar la alarma.', 'error');
       return;
     }
 
-    soundAlert.stopContinuousAlarm();
-    soundAlert.playFeedbackBeep();
-    setIsDrillActive(false);
-    setDrillType(null);
-    setIsAlarmActive(false);
-    setIsLightActive(false);
-    setDismissEmergencyBanner(true);
-
     const dev = visibleDevices.find(d => d.id === activeTelemetryDeviceId) || visibleDevices[0];
-    if (dev) {
-      setDevices(prev => prev.map(d => d.id === dev.id ? {
+    const targetId = dev?.id || 'device_38A839E81F84';
+
+    try {
+      await shutdownAlarmCompletelyInRTDB(targetId, currentUser, { resetSensorBaselines: true });
+      soundAlert.stopContinuousAlarm();
+      soundAlert.playFeedbackBeep();
+      setIsDrillActive(false);
+      setDrillType(null);
+      setIsAlarmActive(false);
+      setIsLightActive(false);
+      setDismissEmergencyBanner(true);
+
+      setDevices(prev => prev.map(d => (d.id === targetId || d.id === 'device_38A839E81F84') ? {
         ...d,
         status: 'normal',
         alarmaActiva: false,
@@ -740,34 +758,34 @@ export default function App() {
         rawPM25: 25,
         metrics: { ...d.metrics, co: 8.5, polvoPM: 25 }
       } : d));
+
+      setAlerts(prev => prev.map(a => a.id.startsWith('alt-drill-') ? { ...a, resolved: true, acknowledged: true } : a));
+      showAlarmFeedback('Simulacro finalizado y comando_web="APAGAR" enviado a Firebase RTDB.', 'success');
+    } catch (err: any) {
+      showAlarmFeedback(err?.message || 'Error al detener el simulacro en Firebase RTDB.', 'error');
     }
-
-    setAlerts(prev => prev.map(a => a.id.startsWith('alt-drill-') ? { ...a, resolved: true, acknowledged: true } : a));
-
-    // Clear drill and reset active device in Firebase Realtime Database
-    await broadcastDrillToRTDB(false, null, dev?.id || 'device_38A839E81F84');
   }, [currentUser, visibleDevices, activeTelemetryDeviceId, showAlarmFeedback]);
 
   const handleToggleAlarm = useCallback(async () => {
     const dev = visibleDevices.find(d => d.id === activeTelemetryDeviceId) || visibleDevices[0];
+    const targetId = activeTelemetryDeviceId || dev?.id || 'device_38A839E81F84';
     const currentlyActive = Boolean(isAlarmActive || dev?.alarmaActiva);
 
     if (currentlyActive) {
-      // Apagar la alarma completamente está restringido exclusivamente al SuperAdmin
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        showAlarmFeedback('Acceso denegado: Solo el usuario SuperAdministrador puede apagar la alarma completamente.', 'error');
-        return;
-      }
       await handleShutdownAlarmCompletely();
       return;
     }
 
-    // Encender la alarma sonora
-    soundAlert.setMuted(false);
-    soundAlert.startContinuousAlarm();
-    setIsAlarmActive(true);
-    setDismissEmergencyBanner(false);
-    await toggleGatewayAlarmInRTDB(activeTelemetryDeviceId, true, currentUser);
+    try {
+      await toggleGatewayAlarmInRTDB(targetId, true, currentUser);
+      soundAlert.setMuted(false);
+      soundAlert.startContinuousAlarm();
+      setIsAlarmActive(true);
+      setDismissEmergencyBanner(false);
+      showAlarmFeedback(`Alarma activada: comando_web="ENCENDER" enviado a /dispositivos/${targetId}.`, 'success');
+    } catch (err: any) {
+      showAlarmFeedback(err?.message || 'Error al enviar comando ENCENDER a Firebase RTDB.', 'error');
+    }
   }, [visibleDevices, activeTelemetryDeviceId, isAlarmActive, currentUser, showAlarmFeedback, handleShutdownAlarmCompletely]);
 
   const handleToggleLight = useCallback(async () => {
@@ -922,20 +940,14 @@ export default function App() {
 
   const handleLogin = useCallback((user: UserProfile) => {
     setCurrentUser(user);
-    try {
-      localStorage.setItem('minesafe_active_user', JSON.stringify(user));
-    } catch (e) {
-      console.warn('Storage error:', e);
-    }
     setShowLoginModal(false);
   }, []);
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback(async () => {
+    await logoutFromFirebaseAuth().catch(() => {});
     try {
       localStorage.removeItem('minesafe_active_user');
-    } catch (e) {
-      console.warn('Storage error:', e);
-    }
+    } catch { /* ignore */ }
     setCurrentUser(null);
     setShowLoginModal(false);
   }, []);
@@ -995,7 +1007,18 @@ export default function App() {
     setCurrentTab(tab);
   }, [currentUser, platformConfig]);
 
-  // GATEKEEPER: Require login before entering the application
+  // Wait for Firebase Authentication initialization before rendering gate or dashboard
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen w-full bg-slate-950 flex flex-col items-center justify-center p-6 text-slate-300">
+        <div className="w-10 h-10 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin mb-4" />
+        <p className="text-sm font-semibold text-white">Verificando sesión en Firebase Authentication...</p>
+        <p className="text-xs text-slate-400 mt-1">MineSafe IoT · Control de Acceso Seguro</p>
+      </div>
+    );
+  }
+
+  // GATEKEEPER: Require real Firebase Auth login before entering the application
   if (!currentUser) {
     return (
       <LoginModal
@@ -1325,7 +1348,9 @@ export default function App() {
             setIsAlarmActive(true);
             setDismissEmergencyBanner(false);
             if (activeDevice) {
-              toggleGatewayAlarmInRTDB(activeDevice.id, true);
+              toggleGatewayAlarmInRTDB(activeDevice.id, true, currentUser).catch((err: any) => {
+                showAlarmFeedback(err?.message || 'Error al activar alarma de evacuación en Firebase RTDB.', 'error');
+              });
             }
           }}
           currentUser={currentUser}

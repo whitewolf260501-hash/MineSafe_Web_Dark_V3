@@ -237,6 +237,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             isLightActive={isLightActive}
             onToggleLight={onToggleLight}
             isSuperAdmin={currentUser?.role === 'superadmin'}
+            currentUser={currentUser}
           />
         )}
 

@@ -12,7 +12,18 @@ import {
   get,
   Database 
 } from 'firebase/database';
-import { getAuth } from 'firebase/auth';
+import { 
+  getAuth,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  signOut,
+  onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  User as FirebaseUser
+} from 'firebase/auth';
 
 import firebaseConfig from '../../firebase-applet-config.json';
 import { 
@@ -187,12 +198,36 @@ export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevic
 export const PRIMARY_SUPERADMIN_EMAIL = 'manuelcrisostomovega@gmail.com';
 export const PRIMARY_SUPERADMIN_UID = 'manual_temp_uid_01';
 
+function mapFirebaseAuthError(err: any): string {
+  const code = err?.code || '';
+  switch (code) {
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'Correo o contraseña incorrectos en Firebase Authentication. Acceso denegado.';
+    case 'auth/invalid-email':
+      return 'El formato del correo electrónico no es válido.';
+    case 'auth/user-disabled':
+      return 'Esta cuenta ha sido deshabilitada en Firebase Authentication.';
+    case 'auth/too-many-requests':
+      return 'Demasiados intentos fallidos. Espera unos minutos antes de volver a intentar.';
+    case 'auth/email-already-in-use':
+      return 'Este correo electrónico ya está registrado en Firebase Authentication.';
+    case 'auth/weak-password':
+      return 'La contraseña debe tener al menos 6 caracteres.';
+    case 'auth/network-request-failed':
+      return 'Error de red al conectar con Firebase Authentication. Verifica tu conexión a Internet.';
+    default:
+      return err?.message || 'Error al autenticar con Firebase Authentication.';
+  }
+}
+
 export function mapRTDBUserToUserProfile(key: string, data: any): UserProfile {
   const emailLower = (data?.email || '').toLowerCase();
   const isCanonicalSuper =
     emailLower === PRIMARY_SUPERADMIN_EMAIL ||
     key === PRIMARY_SUPERADMIN_UID;
-  const isSuper = isCanonicalSuper || data?.isSuperUser === true;
+  const isSuper = isCanonicalSuper || data?.isSuperUser === true || data?.tipoUsuario === 'superadmin';
   const isAdmin = isSuper || data?.isAdmin === true || data?.tipoUsuario === 'admin' || data?.cargo === 'Administrador' || data?.tipoUsuario === 'supervisor';
 
   let role: UserRole = 'operador';
@@ -222,10 +257,218 @@ export function mapRTDBUserToUserProfile(key: string, data: any): UserProfile {
     rut: data?.codigoId || data?.telefono || '15.932.104-K',
     shift: data?.cargo || data?.tipoMina || 'Turno Continuo A',
     status: data?.isActive !== false ? 'activo' : 'inactivo',
-    lastLogin: 'En línea (RTDB)',
+    lastLogin: 'En línea (Firebase Auth)',
     assignedSector: assignedSector,
     assignedDeviceCode: assignedDev,
   };
+}
+
+export async function resolveUserProfileFromAuthUser(fbUser: FirebaseUser): Promise<UserProfile> {
+  const emailLower = (fbUser.email || '').trim().toLowerCase();
+
+  // 1. Buscar directamente por UID en /usuarios/{uid}
+  try {
+    const byUidSnap = await get(ref(rtdb, `usuarios/${fbUser.uid}`));
+    if (byUidSnap.exists()) {
+      const profile = mapRTDBUserToUserProfile(fbUser.uid, byUidSnap.val());
+      if (profile.status === 'inactivo') {
+        await signOut(auth);
+        throw new Error('Tu cuenta se encuentra desactivada por administración.');
+      }
+      return profile;
+    }
+  } catch (err: any) {
+    if (err?.message?.includes('desactivada')) throw err;
+  }
+
+  // 2. Buscar por email en /usuarios y /precarga/usuarios_contratos
+  try {
+    const allUsersSnap = await get(ref(rtdb, 'usuarios'));
+    if (allUsersSnap.exists()) {
+      const allUsers = allUsersSnap.val() || {};
+      const matchedKey = Object.keys(allUsers).find(
+        (k) => (allUsers[k]?.email || '').trim().toLowerCase() === emailLower
+      );
+      if (matchedKey) {
+        const profile = mapRTDBUserToUserProfile(matchedKey, allUsers[matchedKey]);
+        if (profile.status === 'inactivo') {
+          await signOut(auth);
+          throw new Error('Tu cuenta se encuentra desactivada por administración.');
+        }
+        return profile;
+      }
+    }
+  } catch (err: any) {
+    if (err?.message?.includes('desactivada')) throw err;
+  }
+
+  // 3. Fallback si fue creado directamente en Firebase Auth Console sin nodo previo en RTDB
+  const isCanonicalSuper = emailLower === PRIMARY_SUPERADMIN_EMAIL;
+  return {
+    id: isCanonicalSuper ? PRIMARY_SUPERADMIN_UID : fbUser.uid,
+    name: fbUser.displayName || (isCanonicalSuper ? 'Manuel Crisostomo' : (emailLower.split('@')[0] || 'Operador')),
+    email: fbUser.email || '',
+    role: isCanonicalSuper ? 'superadmin' : 'operador',
+    roleLabel: isCanonicalSuper ? 'Super Administrador de Seguridad Minera' : 'Usuario Normal / Operador de Faena',
+    rut: 'No registrado',
+    shift: 'Turno Continuo A',
+    status: 'activo',
+    lastLogin: 'En línea (Firebase Auth)',
+    assignedSector: 'Mina Chuquicamata',
+    assignedDeviceCode: isCanonicalSuper ? 'device_38A839E81F84' : '',
+  };
+}
+
+export async function loginWithFirebaseAuth(
+  email: string,
+  password: string,
+  rememberMe: boolean = true
+): Promise<UserProfile> {
+  const cleanEmail = email.trim();
+  if (!cleanEmail || !password) {
+    throw new Error('Debes ingresar tu correo electrónico y contraseña.');
+  }
+
+  try {
+    await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence).catch(() => {});
+    const credential = await signInWithEmailAndPassword(auth, cleanEmail, password);
+    return await resolveUserProfileFromAuthUser(credential.user);
+  } catch (err: any) {
+    throw new Error(mapFirebaseAuthError(err));
+  }
+}
+
+export async function registerWithFirebaseAuth(
+  name: string,
+  email: string,
+  password: string,
+  rut: string,
+  shift: string
+): Promise<UserProfile> {
+  const cleanEmail = email.trim();
+  const cleanName = name.trim();
+  if (!cleanName || !cleanEmail || !password) {
+    throw new Error('Nombre, correo y contraseña (mínimo 6 caracteres) son obligatorios.');
+  }
+
+  try {
+    const credential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+    const uid = credential.user.uid;
+    const isCanonicalSuper = cleanEmail.toLowerCase() === PRIMARY_SUPERADMIN_EMAIL;
+    const safeRole: UserRole = isCanonicalSuper ? 'superadmin' : 'operador';
+
+    const newUser: UserProfile = {
+      id: uid,
+      name: cleanName,
+      email: cleanEmail,
+      role: safeRole,
+      roleLabel: isCanonicalSuper
+        ? 'Super Administrador de Seguridad Minera'
+        : 'Usuario Normal / Operador de Faena',
+      rut: rut.trim() || 'No registrado',
+      shift: shift.trim() || 'Turno Mañana',
+      status: 'activo',
+      lastLogin: 'En línea (Firebase Auth)',
+      assignedSector: 'Faena Minera Central',
+      assignedDeviceCode: '',
+    };
+
+    await set(ref(rtdb, `usuarios/${uid}`), {
+      nombre: newUser.name,
+      email: newUser.email,
+      isAdmin: safeRole === 'superadmin',
+      isSuperUser: safeRole === 'superadmin',
+      tipoUsuario: safeRole,
+      isActive: true,
+      telefono: newUser.rut,
+      cargo: newUser.shift,
+      geoMina: newUser.assignedSector,
+      deviceId: '',
+      updatedAt: new Date().toISOString(),
+    }).catch(() => {});
+
+    return newUser;
+  } catch (err: any) {
+    throw new Error(mapFirebaseAuthError(err));
+  }
+}
+
+export async function sendPasswordResetWithFirebase(email: string): Promise<void> {
+  const cleanEmail = email.trim();
+  if (!cleanEmail) {
+    throw new Error('Ingresa tu correo electrónico registrado.');
+  }
+  try {
+    await sendPasswordResetEmail(auth, cleanEmail);
+  } catch (err: any) {
+    throw new Error(mapFirebaseAuthError(err));
+  }
+}
+
+export async function logoutFromFirebaseAuth(): Promise<void> {
+  await signOut(auth);
+}
+
+export function subscribeToFirebaseAuth(callback: (user: UserProfile | null) => void): () => void {
+  return onAuthStateChanged(auth, async (fbUser) => {
+    if (!fbUser) {
+      callback(null);
+      return;
+    }
+    try {
+      const profile = await resolveUserProfileFromAuthUser(fbUser);
+      callback(profile);
+    } catch {
+      callback(null);
+    }
+  });
+}
+
+/**
+ * Verifica contra Firebase Authentication y la base de datos RTDB si el usuario autenticado
+ * posee privilegios reales de SuperAdministrador.
+ */
+export async function verifySuperAdminPrivileges(actingUser?: UserProfile | null): Promise<boolean> {
+  const fbUser = auth.currentUser;
+  if (!fbUser) {
+    return false;
+  }
+
+  const fbEmail = (fbUser.email || '').trim().toLowerCase();
+  if (actingUser && actingUser.role !== 'superadmin') {
+    return false;
+  }
+
+  try {
+    const byUidSnap = await get(ref(rtdb, `usuarios/${fbUser.uid}`));
+    if (byUidSnap.exists()) {
+      const data = byUidSnap.val();
+      if (data?.isActive === false) return false;
+      if (data?.isSuperUser === true || data?.tipoUsuario === 'superadmin') {
+        return true;
+      }
+    }
+
+    const allUsersSnap = await get(ref(rtdb, 'usuarios'));
+    if (allUsersSnap.exists()) {
+      const allUsers = allUsersSnap.val() || {};
+      const matchedKey = Object.keys(allUsers).find(
+        (k) => (allUsers[k]?.email || '').trim().toLowerCase() === fbEmail
+      );
+      if (matchedKey) {
+        const u = allUsers[matchedKey];
+        if (u?.isActive === false) return false;
+        if (u?.isSuperUser === true || u?.tipoUsuario === 'superadmin' || matchedKey === PRIMARY_SUPERADMIN_UID) {
+          return true;
+        }
+        return false;
+      }
+    }
+  } catch (err) {
+    console.warn('Error verificando privilegios SuperAdmin en RTDB:', err);
+  }
+
+  return fbEmail === PRIMARY_SUPERADMIN_EMAIL;
 }
 
 export function mapRTDBContractToRental(key: string, data: any): DeviceRental {
@@ -653,48 +896,77 @@ export async function sendESP32Command(deviceId: string, command: 'pause' | 'res
   }
 }
 
+async function ensureValidDevicePayload(
+  deviceId: string,
+  payload: Record<string, any>
+): Promise<void> {
+  const devRef = ref(rtdb, `dispositivos/${deviceId}`);
+  const snap = await get(devRef).catch(() => null);
+  const existing = snap?.exists() ? snap.val() : null;
+
+  const finalPayload: Record<string, any> = { ...payload };
+  // Si el nodo aún no existe o le falta/excede alguno de los campos obligatorios de validación RTDB,
+  // los completamos para garantizar que update() nunca sea rechazado por .validate
+  const validCO = typeof existing?.CO === 'number' && existing.CO >= 0 && existing.CO <= 4095;
+  const validPM = typeof existing?.PM2_5 === 'number' && existing.PM2_5 >= 0 && existing.PM2_5 <= 4095;
+  const validTemp = typeof existing?.temperatura === 'number' && existing.temperatura >= -40 && existing.temperatura <= 100;
+  const validHum = typeof existing?.humedad === 'number' && existing.humedad >= 0 && existing.humedad <= 100;
+
+  if (!validCO && finalPayload.CO === undefined) finalPayload.CO = 45;
+  if (!validPM && finalPayload.PM2_5 === undefined) finalPayload.PM2_5 = 25;
+  if (!validTemp && finalPayload.temperatura === undefined) finalPayload.temperatura = 22.0;
+  if (!validHum && finalPayload.humedad === undefined) finalPayload.humedad = 48;
+
+  await update(devRef, finalPayload);
+}
+
 export async function resetGatewayDataInRTDB(
   deviceId?: string,
   actingUser?: UserProfile | null
 ): Promise<void> {
   if (actingUser && actingUser.role !== 'superadmin') {
-    throw new Error('Acceso denegado: Solo el SuperAdministrador puede resetear o apagar alarmas en RTDB.');
+    const isSuper = await verifySuperAdminPrivileges(actingUser);
+    if (!isSuper) {
+      throw new Error('Acceso denegado: Solo el SuperAdministrador autenticado puede resetear o apagar alarmas en RTDB.');
+    }
   }
-  try {
-    const now = Date.now();
-    const resetPayload = {
-      CO: 45, // safe clean air baseline
-      PM2_5: 25, // safe low particle baseline
-      temperatura: 21.5,
-      humedad: 48,
-      last_update_server: now,
+  const now = Date.now();
+  const resetPayload = {
+    CO: 45,
+    PM2_5: 25,
+    temperatura: 21.5,
+    humedad: 48,
+    last_update_server: now,
+    alarma: false,
+    alarma_activa: false,
+    buzzer: false,
+    luz: false,
+    iluminacion_led: false,
+    comando_web: 'APAGAR',
+    silencio_remoto: true,
+    origen_alarma: 'NINGUNO',
+    estado_adquisicion: 'activo',
+    simulacro_activo: false,
+  };
+
+  const targetId = deviceId || 'device_38A839E81F84';
+  await update(ref(rtdb, `dispositivos/${targetId}`), resetPayload);
+
+  if (targetId !== 'device_38A839E81F84') {
+    await ensureValidDevicePayload('device_38A839E81F84', {
+      comando_web: 'APAGAR',
+      silencio_remoto: true,
       alarma: false,
       alarma_activa: false,
       buzzer: false,
       luz: false,
       iluminacion_led: false,
-      origen_alarma: 'NINGUNO',
-      estado_adquisicion: 'activo',
-      simulacro_activo: false,
-    };
-
-    const targetId = deviceId || 'device_38A839E81F84';
-    const devRef = ref(rtdb, `dispositivos/${targetId}`);
-    await update(devRef, resetPayload).catch(() => {});
-
-    // Reset root alert/drill indicators
-    const rootRef = ref(rtdb);
-    await update(rootRef, {
-      alarma: false,
-      buzzer: false,
-      luz: false,
-      alerta_activa: null,
-      simulacro: { activo: false, finalizado: true, timestamp: now },
-      emergencia: { activa: false, timestamp: now }
+      last_update_server: now,
     }).catch(() => {});
-  } catch (err) {
-    console.warn('Error resetting gateway in RTDB:', err);
   }
+
+  await update(ref(rtdb, 'simulacro'), { activo: false, finalizado: true, timestamp: now }).catch(() => {});
+  await update(ref(rtdb, 'emergencia'), { activa: false, timestamp: now }).catch(() => {});
 }
 
 export async function toggleGatewayAlarmInRTDB(
@@ -702,37 +974,29 @@ export async function toggleGatewayAlarmInRTDB(
   active: boolean,
   actingUser?: UserProfile | null
 ): Promise<void> {
-  if (!active && actingUser && actingUser.role !== 'superadmin') {
-    throw new Error('Acceso denegado: Solo el SuperAdministrador puede apagar la alarma.');
-  }
-  try {
-    const now = Date.now();
-    const payload: Record<string, any> = {
-      alarma: active,
-      alarma_activa: active,
-      buzzer: active,
-      comando_web: active ? 'ENCENDER' : 'APAGAR',
-      silencio_remoto: !active,
-      last_update_server: now,
-    };
-    if (active) {
-      payload.origen_alarma = 'ACTIVACION_MANUAL_WEB';
-    } else {
-      payload.origen_alarma = 'NINGUNO';
+  if (!active) {
+    const isSuper = await verifySuperAdminPrivileges(actingUser);
+    if (!isSuper) {
+      throw new Error('Acceso denegado: Solo un SuperAdministrador autenticado en Firebase Auth puede apagar la alarma.');
     }
+  }
 
-    const targetId = deviceId || 'device_38A839E81F84';
-    const devRef = ref(rtdb, `dispositivos/${targetId}`);
-    await update(devRef, payload).catch(() => {});
+  const now = Date.now();
+  const payload: Record<string, any> = {
+    comando_web: active ? 'ENCENDER' : 'APAGAR',
+    silencio_remoto: !active,
+    alarma: active,
+    alarma_activa: active,
+    buzzer: active,
+    origen_alarma: active ? 'ACTIVACION_MANUAL_WEB' : 'NINGUNO',
+    last_update_server: now,
+  };
 
-    // Update root level alarm for quick listeners
-    const rootRef = ref(rtdb);
-    await update(rootRef, {
-      alarma: active,
-      buzzer: active,
-    }).catch(() => {});
-  } catch (err) {
-    console.warn('Error toggling alarm in RTDB:', err);
+  const targetId = deviceId || 'device_38A839E81F84';
+  await ensureValidDevicePayload(targetId, payload);
+
+  if (targetId !== 'device_38A839E81F84') {
+    await ensureValidDevicePayload('device_38A839E81F84', payload).catch(() => {});
   }
 }
 
@@ -741,74 +1005,63 @@ export async function shutdownAlarmCompletelyInRTDB(
   actingUser: UserProfile | null,
   options?: { resetSensorBaselines?: boolean }
 ): Promise<void> {
-  if (!actingUser || actingUser.role !== 'superadmin') {
-    throw new Error('Acceso denegado: Solo el SuperAdministrador puede apagar la alarma completamente.');
+  const isSuper = await verifySuperAdminPrivileges(actingUser);
+  if (!isSuper) {
+    throw new Error('Acceso denegado: Se requieren privilegios reales de SuperAdministrador en Firebase Auth para apagar la alarma.');
   }
-  try {
-    const now = Date.now();
-    const targetId = deviceId || 'device_38A839E81F84';
-    const devPayload: Record<string, any> = {
-      alarma: false,
-      alarma_activa: false,
-      buzzer: false,
-      luz: false,
-      iluminacion_led: false,
-      simulacro_activo: false,
-      comando_web: 'APAGAR',
-      silencio_remoto: true,
-      origen_alarma: 'NINGUNO',
-      descripcion_monitoreo: `Alarma apagada completamente por SuperAdmin (${actingUser.name}).`,
-      last_update_server: now,
-    };
 
-    if (options?.resetSensorBaselines) {
-      devPayload.CO = 45;
-      devPayload.PM2_5 = 25;
-      devPayload.estado_adquisicion = 'activo';
-    }
+  const now = Date.now();
+  const targetId = deviceId || 'device_38A839E81F84';
+  const devPayload: Record<string, any> = {
+    comando_web: 'APAGAR',
+    silencio_remoto: true,
+    alarma: false,
+    alarma_activa: false,
+    buzzer: false,
+    luz: false,
+    iluminacion_led: false,
+    simulacro_activo: false,
+    origen_alarma: 'NINGUNO',
+    descripcion_monitoreo: `Alarma apagada completamente por SuperAdmin (${actingUser?.name || auth.currentUser?.email || 'SuperAdmin'}).`,
+    last_update_server: now,
+  };
 
-    await update(ref(rtdb, `dispositivos/${targetId}`), devPayload);
-    await update(ref(rtdb), {
-      alarma: false,
-      buzzer: false,
-      luz: false,
-      alerta_activa: null,
-      simulacro: {
-        activo: false,
-        finalizado: true,
-        detenidoPor: actingUser.name,
-        timestamp: now,
-      },
-      emergencia: {
-        activa: false,
-        detenidoPor: actingUser.name,
-        timestamp: now,
-      },
-    });
-  } catch (err) {
-    console.warn('Error shutting down alarm completely in RTDB:', err);
-    throw err;
+  if (options?.resetSensorBaselines) {
+    devPayload.CO = 45;
+    devPayload.PM2_5 = 25;
+    devPayload.estado_adquisicion = 'activo';
   }
+
+  await ensureValidDevicePayload(targetId, devPayload);
+
+  if (targetId !== 'device_38A839E81F84') {
+    await ensureValidDevicePayload('device_38A839E81F84', devPayload).catch(() => {});
+  }
+
+  await update(ref(rtdb, 'simulacro'), {
+    activo: false,
+    finalizado: true,
+    detenidoPor: actingUser?.name || auth.currentUser?.email || 'SuperAdmin',
+    timestamp: now,
+  }).catch(() => {});
+
+  await update(ref(rtdb, 'emergencia'), {
+    activa: false,
+    detenidoPor: actingUser?.name || auth.currentUser?.email || 'SuperAdmin',
+    timestamp: now,
+  }).catch(() => {});
 }
 
 export async function toggleGatewayLightInRTDB(deviceId: string, active: boolean): Promise<void> {
-  try {
-    const now = Date.now();
-    const payload = {
-      luz: active,
-      iluminacion_led: active,
-      last_update_server: now,
-    };
+  const now = Date.now();
+  const payload = {
+    luz: active,
+    iluminacion_led: active,
+    last_update_server: now,
+  };
 
-    const targetId = deviceId || 'device_38A839E81F84';
-    const devRef = ref(rtdb, `dispositivos/${targetId}`);
-    await update(devRef, payload).catch(() => {});
-
-    const rootRef = ref(rtdb);
-    await update(rootRef, { luz: active }).catch(() => {});
-  } catch (err) {
-    console.warn('Error toggling light in RTDB:', err);
-  }
+  const targetId = deviceId || 'device_38A839E81F84';
+  await ensureValidDevicePayload(targetId, payload);
 }
 
 // -------------------------------------------------------------
@@ -831,7 +1084,10 @@ export async function broadcastDrillToRTDB(
         CO: isGas ? 1250 : 45,
         PM2_5: isPolvo ? 650 : 25,
         temperatura: isGas ? 31.4 : 24.5,
+        comando_web: 'ENCENDER',
+        silencio_remoto: false,
         alarma: true,
+        alarma_activa: true,
         buzzer: true,
         luz: true,
         iluminacion_led: true,
@@ -842,33 +1098,26 @@ export async function broadcastDrillToRTDB(
       };
 
       for (const id of devIds) {
-        const devRef = ref(rtdb, `dispositivos/${id}`);
-        await update(devRef, drillPayload).catch(() => {});
+        await ensureValidDevicePayload(id, drillPayload).catch(() => {});
       }
 
-      // Root level broadcast for Android and ESP32
-      const rootRef = ref(rtdb);
-      await update(rootRef, {
-        alarma: true,
-        buzzer: true,
-        luz: true,
-        simulacro: {
-          activo: true,
-          tipo: drillType || 'gas_critico',
-          nombre: drillType === 'gas_critico' 
-            ? 'Simulacro de Fuga de Monóxido de Carbono (DS 132)'
-            : drillType === 'incendio_polvo'
-            ? 'Simulacro de Incendio y Humo Denso (DS 132)'
-            : 'Simulacro General de Evacuación Minera (DS 132)',
-          iniciadoPor: 'Consola Central MineSafe',
-          timestamp: now,
-        },
-        emergencia: {
-          activa: true,
-          esSimulacro: true,
-          tipo: drillType || 'gas_critico',
-          timestamp: now,
-        }
+      await update(ref(rtdb, 'simulacro'), {
+        activo: true,
+        tipo: drillType || 'gas_critico',
+        nombre: drillType === 'gas_critico' 
+          ? 'Simulacro de Fuga de Monóxido de Carbono (DS 132)'
+          : drillType === 'incendio_polvo'
+          ? 'Simulacro de Incendio y Humo Denso (DS 132)'
+          : 'Simulacro General de Evacuación Minera (DS 132)',
+        iniciadoPor: 'Consola Central MineSafe',
+        timestamp: now,
+      }).catch(() => {});
+
+      await update(ref(rtdb, 'emergencia'), {
+        activa: true,
+        esSimulacro: true,
+        tipo: drillType || 'gas_critico',
+        timestamp: now,
       }).catch(() => {});
     } else {
       // Deactivate drill across all nodes
@@ -901,30 +1150,26 @@ export async function broadcastAlertToRTDB(alert: SafetyAlert): Promise<void> {
       timestamp: now,
     });
 
-    // 2. If it's a critical alert, activate alarma and buzzer on RTDB devices so Android sounds siren
+    // 2. If it's a critical alert, activate alarma and buzzer on RTDB devices so hardware/web react
     if (alert.severity === 'critico') {
-      const devIds = Array.from(new Set([alert.sensorId, 'device_38A839E81F84', 'gateway']));
+      const devIds = Array.from(new Set([alert.sensorId, 'device_38A839E81F84']));
       for (const id of devIds) {
-        const devRef = ref(rtdb, `dispositivos/${id}`);
-        await update(devRef, {
+        await ensureValidDevicePayload(id, {
+          comando_web: 'ENCENDER',
+          silencio_remoto: false,
           alarma: true,
+          alarma_activa: true,
           buzzer: true,
           luz: true,
           last_update_server: now,
         }).catch(() => {});
       }
-      const rootRef = ref(rtdb);
-      await update(rootRef, {
-        alarma: true,
-        buzzer: true,
-        luz: true,
-        alerta_activa: {
-          id: alert.id,
-          titulo: alert.title,
-          severidad: alert.severity,
-          sensor: alert.sensorCode,
-          timestamp: now,
-        }
+      await update(ref(rtdb, 'emergencia'), {
+        activa: true,
+        esSimulacro: false,
+        alertaId: alert.id,
+        titulo: alert.title,
+        timestamp: now,
       }).catch(() => {});
     }
   } catch (err) {
