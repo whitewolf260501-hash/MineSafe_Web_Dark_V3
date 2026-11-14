@@ -155,6 +155,7 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
   const [visibilitySyncError, setVisibilitySyncError] = useState<string | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [userSearch, setUserSearch] = useState('');
+  const [userOverrideSection, setUserOverrideSection] = useState<'main' | 'equipos'>('main');
   const [isSaving, setIsSaving] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -380,6 +381,45 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
           delete nextEmailOverrides[emailKey];
         } else {
           nextEmailOverrides[emailKey] = emailMap;
+        }
+      }
+
+      return {
+        ...prev,
+        visibility: {
+          ...prev.visibility,
+          equiposSubTabUserOverrides: nextOverrides,
+          equiposSubTabUserOverridesByEmail: nextEmailOverrides,
+        },
+      };
+    });
+  };
+
+  const handleSetAllUserEquiposSubTabs = (
+    targetUser: UserProfile,
+    value: WindowOverrideValue
+  ) => {
+    soundAlert.playFeedbackBeep();
+    const emailKey = normalizeEmailOverrideKey(targetUser.email);
+    commitVisibilityChange((prev) => {
+      const nextOverrides = { ...(prev.visibility.equiposSubTabUserOverrides || {}) };
+      const nextEmailOverrides = { ...(prev.visibility.equiposSubTabUserOverridesByEmail || {}) };
+
+      if (value === 'inherit') {
+        delete nextOverrides[targetUser.id];
+        if (emailKey) {
+          delete nextEmailOverrides[emailKey];
+        }
+      } else {
+        const allMap: Partial<Record<EquiposSubTab, WindowOverrideValue>> = {
+          asignaciones: value,
+          arriendos: value,
+          pagos: value,
+          inventario: value,
+        };
+        nextOverrides[targetUser.id] = allMap;
+        if (emailKey) {
+          nextEmailOverrides[emailKey] = { ...allMap };
         }
       }
 
@@ -1203,157 +1243,312 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                   </div>
                 )}
 
-                <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-                  {CONTROLLABLE_WINDOWS.map((win) => {
-                    const roleKey = activeTargetUser.role === 'admin' ? 'admin' : 'operador';
-                    const roleDefault = draftConfig.visibility.rolePermissions[roleKey][win.id];
-                    const activeEmailKey = normalizeEmailOverrideKey(activeTargetUser.email);
-                    const byIdVal = draftConfig.visibility.userOverrides?.[activeTargetUser.id]?.[win.id];
-                    const byEmailVal = activeEmailKey
-                      ? draftConfig.visibility.userOverridesByEmail?.[activeEmailKey]?.[win.id]
-                      : undefined;
-                    const currentOverride: WindowOverrideValue =
-                      (byIdVal && byIdVal !== 'inherit' ? byIdVal : byEmailVal) || 'inherit';
+                {(() => {
+                  const activeEmailKey = normalizeEmailOverrideKey(activeTargetUser.email);
+                  const mainOverrideCount = new Set([
+                    ...Object.keys(draftConfig.visibility.userOverrides?.[activeTargetUser.id] || {}),
+                    ...(activeEmailKey
+                      ? Object.keys(draftConfig.visibility.userOverridesByEmail?.[activeEmailKey] || {})
+                      : []),
+                  ]).size;
+                  const subOverrideCount = new Set([
+                    ...Object.keys(
+                      draftConfig.visibility.equiposSubTabUserOverrides?.[activeTargetUser.id] || {}
+                    ),
+                    ...(activeEmailKey
+                      ? Object.keys(
+                          draftConfig.visibility.equiposSubTabUserOverridesByEmail?.[activeEmailKey] || {}
+                        )
+                      : []),
+                  ]).size;
 
-                    return (
-                      <div
-                        key={win.id}
-                        className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800/80 flex items-center justify-between gap-2"
-                      >
-                        <div className="min-w-0">
-                          <span className="text-xs font-semibold text-slate-200 block truncate">
-                            {win.label}
-                          </span>
-                          <span className="text-[10px] text-slate-400">
-                            Por rol: {roleDefault ? 'Visible' : 'Bloqueada'}
-                          </span>
-                        </div>
+                  const roleKey = activeTargetUser.role === 'admin' ? 'admin' : 'operador';
+                  const parentById = draftConfig.visibility.userOverrides?.[activeTargetUser.id]?.equipos;
+                  const parentByEmail = activeEmailKey
+                    ? draftConfig.visibility.userOverridesByEmail?.[activeEmailKey]?.equipos
+                    : undefined;
+                  const parentOverride: WindowOverrideValue =
+                    (parentById && parentById !== 'inherit' ? parentById : parentByEmail) || 'inherit';
+                  const parentRoleVisible = draftConfig.visibility.rolePermissions[roleKey].equipos;
+                  const isParentEquiposVisible =
+                    parentOverride === 'allow'
+                      ? true
+                      : parentOverride === 'block'
+                      ? false
+                      : parentRoleVisible;
 
-                        <div className="flex items-center gap-1 shrink-0 text-[10px] font-bold">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleUserWindowOverride(activeTargetUser, win.id, 'inherit')
-                            }
-                            className={`px-2 py-1 rounded border transition-colors ${
-                              currentOverride === 'inherit'
-                                ? 'bg-slate-700 text-white border-slate-500'
-                                : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
-                            }`}
-                          >
-                            Rol
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleUserWindowOverride(activeTargetUser, win.id, 'allow')
-                            }
-                            className={`px-2 py-1 rounded border transition-colors ${
-                              currentOverride === 'allow'
-                                ? 'bg-emerald-600 text-white border-emerald-400'
-                                : 'bg-slate-950 text-emerald-400/70 border-slate-800 hover:text-emerald-300'
-                            }`}
-                          >
-                            Ver
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleUserWindowOverride(activeTargetUser, win.id, 'block')
-                            }
-                            className={`px-2 py-1 rounded border flex items-center gap-1 transition-colors ${
-                              currentOverride === 'block'
-                                ? 'bg-rose-600 text-white border-rose-400'
-                                : 'bg-slate-950 text-rose-400/70 border-slate-800 hover:text-rose-300'
-                            }`}
-                          >
-                            <Lock className="w-2.5 h-2.5" />
-                            <span>Bloquear</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {/* Sub-windows of Equipos y Arriendos per User */}
-                  <div className="pt-3 mt-2 border-t border-slate-800/80 space-y-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 block px-1">
-                      Sub-ventanas de Equipos y Arriendos
-                    </span>
-                    {EQUIPOS_SUB_WINDOWS.map((sub) => {
-                      const roleKey = activeTargetUser.role === 'admin' ? 'admin' : 'operador';
-                      const roleDefault =
-                        draftConfig.visibility.equiposSubTabRolePermissions?.[roleKey]?.[sub.id] ?? true;
-                      const activeEmailKey = normalizeEmailOverrideKey(activeTargetUser.email);
-                      const byIdVal =
-                        draftConfig.visibility.equiposSubTabUserOverrides?.[activeTargetUser.id]?.[sub.id];
-                      const byEmailVal = activeEmailKey
-                        ? draftConfig.visibility.equiposSubTabUserOverridesByEmail?.[activeEmailKey]?.[sub.id]
-                        : undefined;
-                      const currentSubOverride: WindowOverrideValue =
-                        (byIdVal && byIdVal !== 'inherit' ? byIdVal : byEmailVal) || 'inherit';
-
-                      return (
-                        <div
-                          key={sub.id}
-                          className="p-2.5 rounded-lg bg-slate-900/60 border border-cyan-950/60 flex items-center justify-between gap-2"
+                  return (
+                    <>
+                      {/* Switcher between Main Windows and Equipos Sub-Windows for selected user */}
+                      <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-900 border border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setUserOverrideSection('main')}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                            userOverrideSection === 'main'
+                              ? 'bg-purple-600 text-white shadow-sm'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
                         >
-                          <div className="min-w-0">
-                            <span className="text-xs font-semibold text-slate-200 block truncate">
-                              {sub.label}
+                          <span>Ventanas Principales</span>
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
+                              userOverrideSection === 'main'
+                                ? 'bg-purple-800 text-purple-100'
+                                : 'bg-slate-800 text-slate-300'
+                            }`}
+                          >
+                            {mainOverrideCount > 0 ? `${mainOverrideCount}/8` : '8'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setUserOverrideSection('equipos')}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                            userOverrideSection === 'equipos'
+                              ? 'bg-cyan-600 text-white shadow-sm'
+                              : 'text-slate-400 hover:text-cyan-300'
+                          }`}
+                        >
+                          <span>Sub-ventanas Equipos</span>
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
+                              userOverrideSection === 'equipos'
+                                ? 'bg-cyan-800 text-cyan-100'
+                                : 'bg-slate-800 text-cyan-300'
+                            }`}
+                          >
+                            {subOverrideCount > 0 ? `${subOverrideCount}/4` : '4'}
+                          </span>
+                        </button>
+                      </div>
+
+                      {userOverrideSection === 'main' ? (
+                        <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                          {CONTROLLABLE_WINDOWS.map((win) => {
+                            const roleDefault = draftConfig.visibility.rolePermissions[roleKey][win.id];
+                            const byIdVal =
+                              draftConfig.visibility.userOverrides?.[activeTargetUser.id]?.[win.id];
+                            const byEmailVal = activeEmailKey
+                              ? draftConfig.visibility.userOverridesByEmail?.[activeEmailKey]?.[win.id]
+                              : undefined;
+                            const currentOverride: WindowOverrideValue =
+                              (byIdVal && byIdVal !== 'inherit' ? byIdVal : byEmailVal) || 'inherit';
+
+                            return (
+                              <div
+                                key={win.id}
+                                className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800/80 flex items-center justify-between gap-2"
+                              >
+                                <div className="min-w-0">
+                                  <span className="text-xs font-semibold text-slate-200 block truncate">
+                                    {win.label}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400">
+                                    Por rol: {roleDefault ? 'Visible' : 'Bloqueada'}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-1 shrink-0 text-[10px] font-bold">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleUserWindowOverride(activeTargetUser, win.id, 'inherit')
+                                    }
+                                    className={`px-2 py-1 rounded border transition-colors ${
+                                      currentOverride === 'inherit'
+                                        ? 'bg-slate-700 text-white border-slate-500'
+                                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                                    }`}
+                                  >
+                                    Rol
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleUserWindowOverride(activeTargetUser, win.id, 'allow')
+                                    }
+                                    className={`px-2 py-1 rounded border transition-colors ${
+                                      currentOverride === 'allow'
+                                        ? 'bg-emerald-600 text-white border-emerald-400'
+                                        : 'bg-slate-950 text-emerald-400/70 border-slate-800 hover:text-emerald-300'
+                                    }`}
+                                  >
+                                    Ver
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleUserWindowOverride(activeTargetUser, win.id, 'block')
+                                    }
+                                    className={`px-2 py-1 rounded border flex items-center gap-1 transition-colors ${
+                                      currentOverride === 'block'
+                                        ? 'bg-rose-600 text-white border-rose-400'
+                                        : 'bg-slate-950 text-rose-400/70 border-slate-800 hover:text-rose-300'
+                                    }`}
+                                  >
+                                    <Lock className="w-2.5 h-2.5" />
+                                    <span>Bloquear</span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {!isParentEquiposVisible && (
+                            <div className="p-2.5 rounded-lg bg-amber-950/50 border border-amber-700/70 flex flex-col gap-2">
+                              <div className="flex items-start gap-2 text-[11px] text-amber-200">
+                                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                <span>
+                                  Este usuario tiene bloqueada la pestaña principal{' '}
+                                  <strong>Equipos y Arriendos</strong>. Habilítala para que pueda entrar a las sub-ventanas permitidas.
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleUserWindowOverride(activeTargetUser, 'equipos', 'allow')
+                                }
+                                className="self-start px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold transition-colors"
+                              >
+                                Habilitar &quot;Equipos y Arriendos&quot; para este usuario
+                              </button>
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                              Sub-ventanas de Equipos y Arriendos
                             </span>
-                            <span className="text-[10px] text-slate-400">
-                              Por rol: {roleDefault ? 'Visible' : 'Bloqueada'}
-                            </span>
+                            <div className="flex items-center gap-1 text-[10px] font-bold">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleSetAllUserEquiposSubTabs(activeTargetUser, 'inherit')
+                                }
+                                className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-white transition-colors"
+                              >
+                                Seguir Rol
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleSetAllUserEquiposSubTabs(activeTargetUser, 'allow')
+                                }
+                                className="px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-700 text-emerald-300 hover:bg-emerald-900/60 transition-colors"
+                              >
+                                Permitir 4
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleSetAllUserEquiposSubTabs(activeTargetUser, 'block')
+                                }
+                                className="px-2 py-0.5 rounded bg-rose-950/70 border border-rose-700 text-rose-300 hover:bg-rose-900/60 transition-colors"
+                              >
+                                Bloquear 4
+                              </button>
+                            </div>
                           </div>
 
-                          <div className="flex items-center gap-1 shrink-0 text-[10px] font-bold">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleUserEquiposSubTabOverride(activeTargetUser, sub.id, 'inherit')
-                              }
-                              className={`px-2 py-1 rounded border transition-colors ${
-                                currentSubOverride === 'inherit'
-                                  ? 'bg-slate-700 text-white border-slate-500'
-                                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
-                              }`}
-                            >
-                              Rol
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleUserEquiposSubTabOverride(activeTargetUser, sub.id, 'allow')
-                              }
-                              className={`px-2 py-1 rounded border transition-colors ${
-                                currentSubOverride === 'allow'
-                                  ? 'bg-emerald-600 text-white border-emerald-400'
-                                  : 'bg-slate-950 text-emerald-400/70 border-slate-800 hover:text-emerald-300'
-                              }`}
-                            >
-                              Ver
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleUserEquiposSubTabOverride(activeTargetUser, sub.id, 'block')
-                              }
-                              className={`px-2 py-1 rounded border flex items-center gap-1 transition-colors ${
-                                currentSubOverride === 'block'
-                                  ? 'bg-rose-600 text-white border-rose-400'
-                                  : 'bg-slate-950 text-rose-400/70 border-slate-800 hover:text-rose-300'
-                              }`}
-                            >
-                              <Lock className="w-2.5 h-2.5" />
-                              <span>Bloquear</span>
-                            </button>
+                          <div className="space-y-2">
+                            {EQUIPOS_SUB_WINDOWS.map((sub) => {
+                              const roleDefault =
+                                draftConfig.visibility.equiposSubTabRolePermissions?.[roleKey]?.[
+                                  sub.id
+                                ] ?? true;
+                              const byIdVal =
+                                draftConfig.visibility.equiposSubTabUserOverrides?.[
+                                  activeTargetUser.id
+                                ]?.[sub.id];
+                              const byEmailVal = activeEmailKey
+                                ? draftConfig.visibility.equiposSubTabUserOverridesByEmail?.[
+                                    activeEmailKey
+                                  ]?.[sub.id]
+                                : undefined;
+                              const currentSubOverride: WindowOverrideValue =
+                                (byIdVal && byIdVal !== 'inherit' ? byIdVal : byEmailVal) ||
+                                'inherit';
+
+                              return (
+                                <div
+                                  key={sub.id}
+                                  className="p-2.5 rounded-lg bg-slate-900/70 border border-cyan-950/70 flex items-center justify-between gap-2"
+                                >
+                                  <div className="min-w-0">
+                                    <span className="text-xs font-semibold text-slate-200 block truncate">
+                                      {sub.label}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400">
+                                      Por rol: {roleDefault ? 'Visible' : 'Bloqueada'}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-1 shrink-0 text-[10px] font-bold">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleUserEquiposSubTabOverride(
+                                          activeTargetUser,
+                                          sub.id,
+                                          'inherit'
+                                        )
+                                      }
+                                      className={`px-2 py-1 rounded border transition-colors ${
+                                        currentSubOverride === 'inherit'
+                                          ? 'bg-slate-700 text-white border-slate-500'
+                                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                                      }`}
+                                    >
+                                      Rol
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleUserEquiposSubTabOverride(
+                                          activeTargetUser,
+                                          sub.id,
+                                          'allow'
+                                        )
+                                      }
+                                      className={`px-2 py-1 rounded border transition-colors ${
+                                        currentSubOverride === 'allow'
+                                          ? 'bg-emerald-600 text-white border-emerald-400'
+                                          : 'bg-slate-950 text-emerald-400/70 border-slate-800 hover:text-emerald-300'
+                                      }`}
+                                    >
+                                      Ver
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleUserEquiposSubTabOverride(
+                                          activeTargetUser,
+                                          sub.id,
+                                          'block'
+                                        )
+                                      }
+                                      className={`px-2 py-1 rounded border flex items-center gap-1 transition-colors ${
+                                        currentSubOverride === 'block'
+                                          ? 'bg-rose-600 text-white border-rose-400'
+                                          : 'bg-slate-950 text-rose-400/70 border-slate-800 hover:text-rose-300'
+                                      }`}
+                                    >
+                                      <Lock className="w-2.5 h-2.5" />
+                                      <span>Bloquear</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             ) : (
               <div className="p-6 text-center text-xs text-slate-400 bg-slate-950/60 rounded-xl border border-slate-800">
