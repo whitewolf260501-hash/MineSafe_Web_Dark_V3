@@ -653,7 +653,13 @@ export async function sendESP32Command(deviceId: string, command: 'pause' | 'res
   }
 }
 
-export async function resetGatewayDataInRTDB(deviceId?: string): Promise<void> {
+export async function resetGatewayDataInRTDB(
+  deviceId?: string,
+  actingUser?: UserProfile | null
+): Promise<void> {
+  if (actingUser && actingUser.role !== 'superadmin') {
+    throw new Error('Acceso denegado: Solo el SuperAdministrador puede resetear o apagar alarmas en RTDB.');
+  }
   try {
     const now = Date.now();
     const resetPayload = {
@@ -663,9 +669,11 @@ export async function resetGatewayDataInRTDB(deviceId?: string): Promise<void> {
       humedad: 48,
       last_update_server: now,
       alarma: false,
+      alarma_activa: false,
       buzzer: false,
       luz: false,
       iluminacion_led: false,
+      origen_alarma: 'NINGUNO',
       estado_adquisicion: 'activo',
       simulacro_activo: false,
     };
@@ -680,6 +688,7 @@ export async function resetGatewayDataInRTDB(deviceId?: string): Promise<void> {
       alarma: false,
       buzzer: false,
       luz: false,
+      alerta_activa: null,
       simulacro: { activo: false, finalizado: true, timestamp: now },
       emergencia: { activa: false, timestamp: now }
     }).catch(() => {});
@@ -688,14 +697,27 @@ export async function resetGatewayDataInRTDB(deviceId?: string): Promise<void> {
   }
 }
 
-export async function toggleGatewayAlarmInRTDB(deviceId: string, active: boolean): Promise<void> {
+export async function toggleGatewayAlarmInRTDB(
+  deviceId: string,
+  active: boolean,
+  actingUser?: UserProfile | null
+): Promise<void> {
+  if (!active && actingUser && actingUser.role !== 'superadmin') {
+    throw new Error('Acceso denegado: Solo el SuperAdministrador puede apagar la alarma.');
+  }
   try {
     const now = Date.now();
-    const payload = {
+    const payload: Record<string, any> = {
       alarma: active,
+      alarma_activa: active,
       buzzer: active,
       last_update_server: now,
     };
+    if (active) {
+      payload.origen_alarma = 'ACTIVACION_MANUAL_WEB';
+    } else {
+      payload.origen_alarma = 'NINGUNO';
+    }
 
     const targetId = deviceId || 'device_38A839E81F84';
     const devRef = ref(rtdb, `dispositivos/${targetId}`);
@@ -709,6 +731,59 @@ export async function toggleGatewayAlarmInRTDB(deviceId: string, active: boolean
     }).catch(() => {});
   } catch (err) {
     console.warn('Error toggling alarm in RTDB:', err);
+  }
+}
+
+export async function shutdownAlarmCompletelyInRTDB(
+  deviceId: string,
+  actingUser: UserProfile | null,
+  options?: { resetSensorBaselines?: boolean }
+): Promise<void> {
+  if (!actingUser || actingUser.role !== 'superadmin') {
+    throw new Error('Acceso denegado: Solo el SuperAdministrador puede apagar la alarma completamente.');
+  }
+  try {
+    const now = Date.now();
+    const targetId = deviceId || 'device_38A839E81F84';
+    const devPayload: Record<string, any> = {
+      alarma: false,
+      alarma_activa: false,
+      buzzer: false,
+      luz: false,
+      iluminacion_led: false,
+      simulacro_activo: false,
+      origen_alarma: 'NINGUNO',
+      descripcion_monitoreo: `Alarma apagada completamente por SuperAdmin (${actingUser.name}).`,
+      last_update_server: now,
+    };
+
+    if (options?.resetSensorBaselines) {
+      devPayload.CO = 45;
+      devPayload.PM2_5 = 25;
+      devPayload.estado_adquisicion = 'activo';
+    }
+
+    await update(ref(rtdb, `dispositivos/${targetId}`), devPayload);
+    await update(ref(rtdb), {
+      alarma: false,
+      buzzer: false,
+      luz: false,
+      alerta_activa: null,
+      simulacro: {
+        activo: false,
+        finalizado: true,
+        detenidoPor: actingUser.name,
+        timestamp: now,
+      },
+      emergencia: {
+        activa: false,
+        detenidoPor: actingUser.name,
+        timestamp: now,
+      },
+    });
+  } catch (err) {
+    console.warn('Error shutting down alarm completely in RTDB:', err);
+    throw err;
   }
 }
 

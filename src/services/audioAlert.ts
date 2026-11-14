@@ -27,6 +27,13 @@ class SoundAlertService {
     return this.isMuted;
   }
 
+  public setMuted(muted: boolean): void {
+    this.isMuted = muted;
+    if (this.isMuted) {
+      this.stopContinuousAlarm();
+    }
+  }
+
   public getMutedState(): boolean {
     return this.isMuted;
   }

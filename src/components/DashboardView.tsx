@@ -53,6 +53,7 @@ interface DashboardViewProps {
   onResetPageLevels?: () => void;
   isAlarmActive?: boolean;
   onToggleAlarm?: () => void;
+  onShutdownAlarmCompletely?: () => void;
   isLightActive?: boolean;
   onToggleLight?: () => void;
   currentUser?: UserProfile | null;
@@ -74,6 +75,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onResetPageLevels,
   isAlarmActive,
   onToggleAlarm,
+  onShutdownAlarmCompletely,
   isLightActive,
   onToggleLight,
   currentUser,
@@ -231,8 +233,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             onResetPageLevels={onResetPageLevels}
             isAlarmActive={isAlarmActive}
             onToggleAlarm={onToggleAlarm}
+            onShutdownAlarmCompletely={onShutdownAlarmCompletely}
             isLightActive={isLightActive}
             onToggleLight={onToggleLight}
+            isSuperAdmin={currentUser?.role === 'superadmin'}
           />
         )}
 

@@ -18,7 +18,8 @@ import {
   Activity,
   FileText,
   CheckCircle2,
-  Edit3
+  Edit3,
+  Lock
 } from 'lucide-react';
 import { soundAlert } from '../services/audioAlert';
 import { UserProfile, DrillDebriefRecord } from '../types';
@@ -168,7 +169,17 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({
                       </p>
                     </div>
 
-                    {!showDrillDebrief ? (
+                    {currentUser?.role !== 'superadmin' ? (
+                      <div className="p-3.5 rounded-xl bg-rose-950/70 border border-rose-700/80 text-rose-100 text-xs flex items-start gap-2.5">
+                        <Lock className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold text-white">Apagado restringido al SuperAdministrador</p>
+                          <p className="text-rose-200/90 mt-0.5 leading-relaxed">
+                            Solo el usuario SuperAdministrador puede finalizar el simulacro y apagar completamente la alarma sonora y baliza.
+                          </p>
+                        </div>
+                      </div>
+                    ) : !showDrillDebrief ? (
                       <div className="space-y-2 pt-1">
                         <button
                           type="button"

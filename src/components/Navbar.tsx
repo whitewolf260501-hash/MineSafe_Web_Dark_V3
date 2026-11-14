@@ -24,7 +24,8 @@ import {
   BellRing,
   BellOff,
   RotateCcw,
-  Sliders
+  Sliders,
+  Lock
 } from 'lucide-react';
 import { NavigationTab, PlatformConfig, UserProfile } from '../types';
 import { soundAlert } from '../services/audioAlert';
@@ -74,13 +75,16 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(soundAlert.getMutedState());
 
+  const isSuperAdmin = currentUser.role === 'superadmin';
+
   const handleToggleSound = () => {
+    if (isAlarmActive && !isMuted && !isSuperAdmin) {
+      return;
+    }
     const muted = soundAlert.toggleMute();
     setIsMuted(muted);
     if (!muted) soundAlert.playFeedbackBeep();
   };
-
-  const isSuperAdmin = currentUser.role === 'superadmin';
   const isSuperOrAdmin = currentUser.role === 'superadmin' || currentUser.role === 'admin';
   const showHardwareControls =
     isSuperAdmin || (platformConfig?.appearance?.allowHardwareControlsForNonSuperAdmin ?? true);
@@ -251,13 +255,30 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={onToggleAlarm}
                   className={`px-1.5 py-1 rounded text-xs flex items-center gap-1 transition-colors shrink-0 ${
                     isAlarmActive
-                      ? 'bg-rose-600 text-white animate-pulse font-bold shadow-sm shadow-rose-950'
+                      ? isSuperAdmin
+                        ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse font-bold shadow-sm shadow-rose-950'
+                        : 'bg-rose-900/80 text-rose-200 border border-rose-700 font-bold cursor-not-allowed'
                       : 'text-slate-400 hover:text-rose-300 hover:bg-slate-800'
                   }`}
-                  title={isAlarmActive ? 'Alarma activa - Clic para desactivar sirena' : 'Alarma inactiva - Clic para activar sirena'}
+                  title={
+                    isAlarmActive
+                      ? isSuperAdmin
+                        ? 'Alarma activa - Clic para apagar completamente (SuperAdmin)'
+                        : 'Alarma activa - Solo el SuperAdministrador puede apagarla'
+                      : 'Alarma inactiva - Clic para encender sirena'
+                  }
                 >
-                  {isAlarmActive ? <BellRing className="w-3.5 h-3.5 animate-bounce" /> : <BellOff className="w-3.5 h-3.5" />}
-                  <span className="text-[11px] font-bold">{isAlarmActive ? 'Alarma ON' : 'Alarma'}</span>
+                  {isAlarmActive ? (
+                    <>
+                      <BellRing className="w-3.5 h-3.5 animate-bounce" />
+                      {!isSuperAdmin && <Lock className="w-3 h-3 text-amber-300" />}
+                    </>
+                  ) : (
+                    <BellOff className="w-3.5 h-3.5" />
+                  )}
+                  <span className="text-[11px] font-bold">
+                    {isAlarmActive ? (isSuperAdmin ? 'Apagar Alarma' : 'Alarma ON') : 'Alarma'}
+                  </span>
                 </button>
               )}
 

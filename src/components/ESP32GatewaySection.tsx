@@ -26,7 +26,8 @@ import {
   Zap,
   Volume2,
   VolumeX,
-  Download
+  Download,
+  Lock
 } from 'lucide-react';
 import { SensorDevice } from '../types';
 import { 
@@ -44,8 +45,10 @@ interface ESP32GatewaySectionProps {
   onResetPageLevels?: () => void;
   isAlarmActive?: boolean;
   onToggleAlarm?: () => void;
+  onShutdownAlarmCompletely?: () => void;
   isLightActive?: boolean;
   onToggleLight?: () => void;
+  isSuperAdmin?: boolean;
 }
 
 export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
@@ -55,8 +58,10 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
   onResetPageLevels,
   isAlarmActive = false,
   onToggleAlarm,
+  onShutdownAlarmCompletely,
   isLightActive = false,
   onToggleLight,
+  isSuperAdmin = false,
 }) => {
   const [localIp, setLocalIp] = useState('192.168.4.1');
   const [isEditingIp, setIsEditingIp] = useState(false);
@@ -141,8 +146,14 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
     }
   };
 
+  const effectiveAlarmActive = Boolean(isAlarmActive || currentDevice?.alarmaActiva);
+
   // 1. Resetear niveles de la página
   const handleResetPageLevels = () => {
+    if (effectiveAlarmActive && !isSuperAdmin) {
+      showNotification('Acción bloqueada: Solo el SuperAdministrador puede apagar o resetear una alarma activa.');
+      return;
+    }
     soundAlert.playFeedbackBeep();
     onResetPageLevels?.();
     showNotification('Niveles de la página restablecidos a condiciones basales seguras (DS 132).');
@@ -151,6 +162,10 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
   // 2. Resetear datos del Gateway (Firebase RTDB)
   const handleResetGatewayData = async () => {
     if (!currentDevice) return;
+    if (effectiveAlarmActive && !isSuperAdmin) {
+      showNotification('Acción bloqueada: Solo el SuperAdministrador puede apagar la alarma y resetear el Gateway.');
+      return;
+    }
     setIsResettingGateway(true);
     soundAlert.playFeedbackBeep();
     try {
@@ -185,13 +200,25 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
     showNotification(`Historial de alarmas descargado en formato Excel / CSV para ${currentDevice.id}.`);
   };
 
-  // 3. Activar y desactivar la alarma
+  // 3. Encender alarma (cualquiera con acceso) o Apagar alarma completamente (SOLO SuperAdmin)
   const handleToggleAlarmClick = async () => {
+    if (effectiveAlarmActive) {
+      if (!isSuperAdmin) {
+        showNotification('Acceso denegado: Solo el usuario SuperAdministrador puede apagar la alarma completamente.');
+        return;
+      }
+      if (onShutdownAlarmCompletely) {
+        onShutdownAlarmCompletely();
+        showNotification('Alarma apagada completamente (sirena web, baliza y Firebase RTDB) por SuperAdmin.');
+        return;
+      }
+    }
     if (onToggleAlarm) {
       onToggleAlarm();
     } else {
-      const nextState = !isAlarmActive;
+      const nextState = !effectiveAlarmActive;
       if (nextState) {
+        soundAlert.setMuted(false);
         soundAlert.startContinuousAlarm();
       } else {
         soundAlert.stopContinuousAlarm();
@@ -611,34 +638,52 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
             <Server className="w-4 h-4 text-emerald-400" />
           </button>
 
-          {/* Botón 3: Activar / Desactivar Alarma (Sirena Sonora y Baliza) */}
+          {/* Botón 3: Activar / Apagar Completamente Alarma (Solo SuperAdmin puede apagarla) */}
           <button
             type="button"
             onClick={handleToggleAlarmClick}
             className={`p-3 rounded-xl border transition-all text-left flex items-center justify-between shadow-md ${
-              isAlarmActive
-                ? 'border-rose-500 bg-rose-950/80 text-rose-200 animate-pulse ring-1 ring-rose-400'
-                : 'border-slate-700 bg-slate-800/90 hover:bg-slate-800 text-slate-300 hover:border-rose-500/60'
+              effectiveAlarmActive
+                ? isSuperAdmin
+                  ? 'border-rose-500 bg-rose-950/90 hover:bg-rose-900/80 text-rose-100 animate-pulse ring-1 ring-rose-400 cursor-pointer'
+                  : 'border-rose-800 bg-rose-950/60 text-rose-200 cursor-not-allowed opacity-90'
+                : 'border-slate-700 bg-slate-800/90 hover:bg-slate-800 text-slate-300 hover:border-rose-500/60 cursor-pointer'
             }`}
           >
             <div className="flex items-center gap-2.5">
               <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold ${
-                isAlarmActive ? 'bg-rose-900 text-rose-200 animate-bounce' : 'bg-slate-900 text-slate-400'
+                effectiveAlarmActive ? 'bg-rose-900 text-rose-200 animate-bounce' : 'bg-slate-900 text-slate-400'
               }`}>
-                {isAlarmActive ? <BellRing className="w-4 h-4 text-rose-300" /> : <BellOff className="w-4 h-4 text-slate-400" />}
+                {effectiveAlarmActive ? (
+                  isSuperAdmin ? <BellRing className="w-4 h-4 text-rose-300" /> : <Lock className="w-4 h-4 text-amber-300" />
+                ) : (
+                  <BellOff className="w-4 h-4 text-slate-400" />
+                )}
               </div>
               <div>
-                <span className={`text-xs font-bold block ${isAlarmActive ? 'text-white' : 'text-white'}`}>
-                  {isAlarmActive ? 'Desactivar Alarma' : 'Activar Alarma'}
+                <span className="text-xs font-bold block text-white">
+                  {effectiveAlarmActive
+                    ? isSuperAdmin
+                      ? 'Apagar Alarma Completamente'
+                      : 'Alarma Activa (Bloqueada)'
+                    : 'Activar Alarma'}
                 </span>
                 <span className="text-[10px] text-slate-400">
-                  {isAlarmActive ? 'Sirena sonora activa' : 'Sirena / Baliza apagada'}
+                  {effectiveAlarmActive
+                    ? isSuperAdmin
+                      ? 'Silenciar sirena, luz y Firebase'
+                      : 'Solo SuperAdmin puede apagarla'
+                    : 'Encender sirena sonora y baliza'}
                 </span>
               </div>
             </div>
-            {isAlarmActive ? (
-              <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-rose-900 text-rose-100 border border-rose-600">
-                ON
+            {effectiveAlarmActive ? (
+              <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold border ${
+                isSuperAdmin
+                  ? 'bg-rose-900 text-rose-100 border-rose-500'
+                  : 'bg-amber-950 text-amber-200 border-amber-700'
+              }`}>
+                {isSuperAdmin ? 'APAGAR' : 'SOLO SA'}
               </span>
             ) : (
               <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-slate-900 text-slate-400 border border-slate-700">

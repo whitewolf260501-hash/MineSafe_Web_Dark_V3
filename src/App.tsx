@@ -51,6 +51,7 @@ import {
   recordPaymentInRTDB,
   USER_RTDB_URL,
   toggleGatewayAlarmInRTDB,
+  shutdownAlarmCompletelyInRTDB,
   toggleGatewayLightInRTDB,
   resetGatewayDataInRTDB,
   broadcastDrillToRTDB,
@@ -64,7 +65,7 @@ import {
 } from './services/firebase';
 
 import { soundAlert } from './services/audioAlert';
-import { ShieldAlert, AlertTriangle, X, Megaphone, Lock } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, X, Megaphone, Lock, CheckCircle2 } from 'lucide-react';
 
 const INITIAL_SINGLE_DEVICE: SensorDevice = {
   id: 'device_38A839E81F84',
@@ -127,6 +128,14 @@ export default function App() {
   const [isDrillActive, setIsDrillActive] = useState<boolean>(false);
   const [drillType, setDrillType] = useState<DrillType | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
+  const [alarmFeedback, setAlarmFeedback] = useState<{ message: string; tone: 'error' | 'success' } | null>(null);
+
+  const showAlarmFeedback = useCallback((message: string, tone: 'error' | 'success') => {
+    setAlarmFeedback({ message, tone });
+    setTimeout(() => {
+      setAlarmFeedback((prev) => (prev?.message === message ? null : prev));
+    }, 4500);
+  }, []);
 
   // Initialize and connect to user's Firebase Realtime Database
   useEffect(() => {
@@ -585,7 +594,52 @@ export default function App() {
     await resetGatewayDataInRTDB(sensorId);
   }, [visibleDevices]);
 
+  const handleShutdownAlarmCompletely = useCallback(async () => {
+    if (!currentUser || currentUser.role !== 'superadmin') {
+      showAlarmFeedback('Acceso denegado: Solo el usuario SuperAdministrador puede apagar la alarma completamente.', 'error');
+      return;
+    }
+
+    const wasDrill = isDrillActive;
+    soundAlert.stopContinuousAlarm();
+    soundAlert.playFeedbackBeep();
+    setIsAlarmActive(false);
+    setIsLightActive(false);
+    setIsDrillActive(false);
+    setDrillType(null);
+    setEvacuationActive(false);
+    setDismissEmergencyBanner(true);
+
+    setAlerts(prev => prev.map(a => ({ ...a, resolved: true, acknowledged: true })));
+    setDevices(prev => prev.map(d => d.id === activeTelemetryDeviceId ? {
+      ...d,
+      alarmaActiva: false,
+      status: wasDrill ? 'normal' : d.status,
+      rawCO: wasDrill ? 45 : d.rawCO,
+      rawPM25: wasDrill ? 25 : d.rawPM25,
+      metrics: wasDrill
+        ? { ...d.metrics, co: 8.5, polvoPM: 25 }
+        : d.metrics,
+    } : d));
+
+    try {
+      await shutdownAlarmCompletelyInRTDB(activeTelemetryDeviceId, currentUser, {
+        resetSensorBaselines: wasDrill,
+      });
+      showAlarmFeedback('Alarma sonora, baliza LED y estado de emergencia apagados completamente por SuperAdministrador.', 'success');
+    } catch {
+      showAlarmFeedback('No se pudo confirmar el apagado completo en Firebase RTDB.', 'error');
+    }
+  }, [currentUser, isDrillActive, activeTelemetryDeviceId, showAlarmFeedback]);
+
   const handleResetPageLevels = useCallback(async () => {
+    const dev = visibleDevices.find(d => d.id === activeTelemetryDeviceId) || visibleDevices[0];
+    const hasActiveAlarm = Boolean(isAlarmActive || isDrillActive || dev?.alarmaActiva);
+    if (hasActiveAlarm && currentUser?.role !== 'superadmin') {
+      showAlarmFeedback('Acción bloqueada: Solo el SuperAdministrador puede apagar o resetear una alarma activa.', 'error');
+      return;
+    }
+
     soundAlert.playFeedbackBeep();
     soundAlert.stopContinuousAlarm();
     setIsAlarmActive(false);
@@ -601,11 +655,12 @@ export default function App() {
     // Reset variables to clean industrial baselines
     setVariables(INITIAL_VARIABLES);
 
-    // Reset all nodes in Firebase RTDB
-    await resetGatewayDataInRTDB(activeTelemetryDeviceId);
-  }, [activeTelemetryDeviceId]);
+    // Reset node in Firebase RTDB
+    await resetGatewayDataInRTDB(activeTelemetryDeviceId, currentUser);
+  }, [visibleDevices, activeTelemetryDeviceId, isAlarmActive, isDrillActive, currentUser, showAlarmFeedback]);
 
   const handleTriggerSimulationEmergency = useCallback(async (type: DrillType) => {
+    soundAlert.setMuted(false);
     soundAlert.startContinuousAlarm();
     setIsDrillActive(true);
     setDrillType(type);
@@ -662,6 +717,11 @@ export default function App() {
   }, [visibleDevices, activeTelemetryDeviceId]);
 
   const handleStopDrill = useCallback(async () => {
+    if (!currentUser || currentUser.role !== 'superadmin') {
+      showAlarmFeedback('Acción bloqueada: Solo el SuperAdministrador puede finalizar un simulacro y apagar la alarma.', 'error');
+      return;
+    }
+
     soundAlert.stopContinuousAlarm();
     soundAlert.playFeedbackBeep();
     setIsDrillActive(false);
@@ -675,6 +735,7 @@ export default function App() {
       setDevices(prev => prev.map(d => d.id === dev.id ? {
         ...d,
         status: 'normal',
+        alarmaActiva: false,
         rawCO: 45,
         rawPM25: 25,
         metrics: { ...d.metrics, co: 8.5, polvoPM: 25 }
@@ -685,18 +746,29 @@ export default function App() {
 
     // Clear drill and reset active device in Firebase Realtime Database
     await broadcastDrillToRTDB(false, null, dev?.id || 'device_38A839E81F84');
-  }, [visibleDevices, activeTelemetryDeviceId]);
+  }, [currentUser, visibleDevices, activeTelemetryDeviceId, showAlarmFeedback]);
 
   const handleToggleAlarm = useCallback(async () => {
-    const next = !isAlarmActive;
-    setIsAlarmActive(next);
-    if (next) {
-      soundAlert.startContinuousAlarm();
-    } else {
-      soundAlert.stopContinuousAlarm();
+    const dev = visibleDevices.find(d => d.id === activeTelemetryDeviceId) || visibleDevices[0];
+    const currentlyActive = Boolean(isAlarmActive || dev?.alarmaActiva);
+
+    if (currentlyActive) {
+      // Apagar la alarma completamente está restringido exclusivamente al SuperAdmin
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        showAlarmFeedback('Acceso denegado: Solo el usuario SuperAdministrador puede apagar la alarma completamente.', 'error');
+        return;
+      }
+      await handleShutdownAlarmCompletely();
+      return;
     }
-    await toggleGatewayAlarmInRTDB(activeTelemetryDeviceId, next);
-  }, [isAlarmActive, activeTelemetryDeviceId]);
+
+    // Encender la alarma sonora
+    soundAlert.setMuted(false);
+    soundAlert.startContinuousAlarm();
+    setIsAlarmActive(true);
+    setDismissEmergencyBanner(false);
+    await toggleGatewayAlarmInRTDB(activeTelemetryDeviceId, true, currentUser);
+  }, [visibleDevices, activeTelemetryDeviceId, isAlarmActive, currentUser, showAlarmFeedback, handleShutdownAlarmCompletely]);
 
   const handleToggleLight = useCallback(async () => {
     const next = !isLightActive;
@@ -955,13 +1027,43 @@ export default function App() {
         onToggleSimulation={() => setIsSimulating(!isSimulating)}
         isFirebaseConnected={isFirebaseConnected}
         onResetPageLevels={handleResetPageLevels}
-        isAlarmActive={isAlarmActive}
+        isAlarmActive={Boolean(isAlarmActive || activeDevice?.alarmaActiva)}
         onToggleAlarm={handleToggleAlarm}
         isLightActive={isLightActive}
         onToggleLight={handleToggleLight}
         isDrillActive={isDrillActive}
         platformConfig={platformConfig}
       />
+
+      {/* Feedback de Control de Alarma (Solo SuperAdmin puede apagarla) */}
+      {alarmFeedback && (
+        <div
+          className={`px-4 py-2.5 border-b text-xs sm:text-sm font-semibold ${
+            alarmFeedback.tone === 'error'
+              ? 'bg-rose-950/95 border-rose-700 text-rose-100'
+              : 'bg-emerald-950/95 border-emerald-700 text-emerald-100'
+          }`}
+        >
+          <div className="max-w-[1850px] w-full mx-auto flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {alarmFeedback.tone === 'error' ? (
+                <Lock className="w-4 h-4 text-amber-300 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              )}
+              <span>{alarmFeedback.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAlarmFeedback(null)}
+              className="p-1 hover:bg-black/20 rounded text-slate-300 hover:text-white"
+              title="Cerrar aviso"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Global Announcement Banner (Configurado por SuperAdministrador) */}
       {platformConfig.appearance.announcementEnabled && platformConfig.appearance.announcementText.trim() !== '' && (
@@ -1019,35 +1121,34 @@ export default function App() {
                 {isDustCritical && <span>Polvo PM2.5 ({activeDevice?.rawPM25 || activeDevice?.metrics?.polvoPM} µg/m³)</span>}
                 {isDrillActive && <span>• [SIMULACRO OPERATIVO]</span>}
               </div>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (isDrillActive) {
-                    await handleStopDrill();
-                  } else {
-                    soundAlert.stopContinuousAlarm();
-                    setIsAlarmActive(false);
-                    setDismissEmergencyBanner(true);
-                    if (activeDevice) {
-                      await resetGatewayDataInRTDB(activeDevice.id);
-                    }
-                    handleResetPageLevels();
-                  }
-                }}
-                className={`px-2.5 py-1 ${
-                  isDrillActive ? 'bg-black text-amber-300 hover:bg-slate-900 border border-amber-400' : 'bg-white hover:bg-slate-100 text-red-700'
-                } text-xs font-black uppercase rounded shadow transition-colors whitespace-nowrap`}
-              >
-                {isDrillActive ? 'Finalizar Simulacro' : 'Resetear Alerta'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setDismissEmergencyBanner(true)}
-                className="p-1 hover:bg-black/20 text-white rounded transition-colors"
-                title="Descartar banner"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              {currentUser.role === 'superadmin' ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleShutdownAlarmCompletely();
+                  }}
+                  className={`px-2.5 py-1 ${
+                    isDrillActive ? 'bg-black text-amber-300 hover:bg-slate-900 border border-amber-400' : 'bg-white hover:bg-slate-100 text-red-700'
+                  } text-xs font-black uppercase rounded shadow transition-colors whitespace-nowrap`}
+                >
+                  {isDrillActive ? 'Finalizar y Apagar Todo' : 'Apagar Alarma Completamente'}
+                </button>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-black/50 border border-white/25 text-[11px] font-bold text-amber-200 whitespace-nowrap">
+                  <Lock className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                  Solo SuperAdmin puede apagar
+                </span>
+              )}
+              {currentUser.role === 'superadmin' && (
+                <button
+                  type="button"
+                  onClick={() => setDismissEmergencyBanner(true)}
+                  className="p-1 hover:bg-black/20 text-white rounded transition-colors"
+                  title="Descartar banner"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1103,6 +1204,7 @@ export default function App() {
                 onResetPageLevels={handleResetPageLevels}
                 isAlarmActive={isAlarmActive}
                 onToggleAlarm={handleToggleAlarm}
+                onShutdownAlarmCompletely={handleShutdownAlarmCompletely}
                 isLightActive={isLightActive}
                 onToggleLight={handleToggleLight}
                 currentUser={currentUser}
