@@ -119,43 +119,70 @@ html.theme-light .hero-card-gradient:hover {
 }
 
 /* ============================================================================
-   VERSIÓN CLARA COMPLETA (INDUSTRIAL DAYLIGHT MODE)
+   VERSIÓN CLARA COMPLETA (INDUSTRIAL DAYLIGHT MODE - SELECTORES EXACTOS)
    ============================================================================ */
 
-/* Superficies base y tarjetas */
-html.theme-light .bg-slate-950,
-html.theme-light [class*="bg-slate-950/"] {
+/* 1. Superficies oscuras slate-950 -> lienzo / sub-tarjeta clara */
+html.theme-light :is(
+  .bg-slate-950,
+  .bg-slate-950\/30,
+  .bg-slate-950\/40,
+  .bg-slate-950\/50,
+  .bg-slate-950\/60,
+  .bg-slate-950\/70,
+  .bg-slate-950\/80,
+  .bg-slate-950\/85,
+  .bg-slate-950\/90,
+  .bg-slate-950\/95
+) {
   background-color: #f8fafc;
 }
 
-html.theme-light main [class*="bg-slate-950"],
-html.theme-light [class*="bg-slate-900"] [class*="bg-slate-950"] {
+html.theme-light :is(
+  .min-h-screen.bg-slate-950,
+  main .bg-slate-950,
+  main .bg-slate-950\/40,
+  main .bg-slate-950\/50,
+  main .bg-slate-950\/60,
+  main .bg-slate-950\/70,
+  main .bg-slate-950\/80,
+  main .bg-slate-950\/90
+) {
   background-color: #f1f5f9;
 }
 
-html.theme-light .min-h-screen[class*="bg-slate-950"] {
-  background-color: #f1f5f9;
-}
-
-html.theme-light header[class*="bg-slate-950"] {
-  background-color: rgba(255, 255, 255, 0.94);
+html.theme-light header:is(.bg-slate-950, .bg-slate-950\/95) {
+  background-color: rgba(255, 255, 255, 0.95);
   box-shadow: 0 4px 18px -4px rgba(15, 23, 42, 0.08);
 }
 
-/* Fondos de modales mantienen velo oscuro */
-html.theme-light .fixed.inset-0[class*="bg-slate-950"] {
+/* Overlays de modales conservan velo oscuro */
+html.theme-light .fixed.inset-0:is(.bg-slate-950\/80, .bg-slate-950\/85, .bg-slate-950\/90, .bg-black\/80) {
   background-color: rgba(15, 23, 42, 0.55);
 }
 
-html.theme-light .bg-slate-900,
-html.theme-light [class*="bg-slate-900/"] {
+/* 2. Tarjetas y contenedores slate-900 -> blanco elevado */
+html.theme-light :is(
+  .bg-slate-900,
+  .bg-slate-900\/40,
+  .bg-slate-900\/60,
+  .bg-slate-900\/70,
+  .bg-slate-900\/80,
+  .bg-slate-900\/85,
+  .bg-slate-900\/90,
+  .bg-slate-900\/95
+) {
   background-color: #ffffff;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 
-html.theme-light .bg-slate-800,
-html.theme-light [class*="bg-slate-800/"] {
+/* 3. Elementos secundarios slate-800 / slate-700 */
+html.theme-light :is(.bg-slate-800, .bg-slate-800\/30, .bg-slate-800\/40, .bg-slate-800\/60, .bg-slate-800\/80, .bg-slate-800\/90) {
   background-color: #e2e8f0;
+}
+
+html.theme-light :is(.bg-slate-700, .bg-slate-700\/60) {
+  background-color: #cbd5e1;
 }
 
 html.theme-light .hover\:bg-slate-800:hover,
@@ -164,16 +191,35 @@ html.theme-light .hover\:bg-slate-700:hover {
 }
 
 html.theme-light .hover\:bg-slate-900:hover,
-html.theme-light .hover\:bg-slate-900\/60:hover {
-  background-color: #f1f5f9;
+html.theme-light .hover\:bg-slate-900\/60:hover,
+html.theme-light .hover\:bg-slate-950:hover {
+  background-color: #e2e8f0;
 }
 
-html.theme-light .bg-slate-700,
-html.theme-light [class*="bg-slate-700/"] {
-  background-color: #cbd5e1;
+/* 4. Tarjetas con degradados oscuros (Welcome Banner, SuperAdmin Banner, DualReadingSensorCards) */
+html.theme-light .bg-gradient-to-r.from-slate-900.via-slate-900.to-cyan-950\/40 {
+  background-image: linear-gradient(to right, #ffffff 0%, #f8fafc 58%, #e0f2fe 100%);
+  box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.09);
 }
 
-/* Formularios e inputs en modo claro */
+html.theme-light .bg-gradient-to-r.from-slate-900.via-slate-900.to-purple-950\/50 {
+  background-image: linear-gradient(to right, #ffffff 0%, #f8fafc 58%, #f3e8ff 100%);
+  box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.09);
+}
+
+html.theme-light .bg-gradient-to-br.from-emerald-950\/40.to-slate-900 {
+  background-image: linear-gradient(to bottom right, #ecfdf5 0%, #ffffff 100%);
+}
+
+html.theme-light .bg-gradient-to-br.from-amber-950\/40.to-slate-900 {
+  background-image: linear-gradient(to bottom right, #fffbeb 0%, #ffffff 100%);
+}
+
+html.theme-light .bg-gradient-to-br.from-rose-950\/70.to-slate-900 {
+  background-image: linear-gradient(to bottom right, #fff1f2 0%, #ffffff 100%);
+}
+
+/* 5. Formularios e inputs en modo claro */
 html.theme-light input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 html.theme-light select,
 html.theme-light textarea {
@@ -187,102 +233,213 @@ html.theme-light textarea::placeholder {
   color: #64748b;
 }
 
-/* Bordes neutros */
-html.theme-light [class*="border-slate-800"],
-html.theme-light [class*="border-slate-900"] {
+/* 6. Bordes neutros */
+html.theme-light :is(
+  .border-slate-800,
+  .border-slate-800\/60,
+  .border-slate-800\/80,
+  .border-slate-800\/90,
+  .border-slate-900
+) {
   border-color: #cbd5e1;
 }
 
-html.theme-light [class*="border-slate-700"] {
+html.theme-light :is(.border-slate-700, .border-slate-700\/80) {
   border-color: #94a3b8;
 }
 
-/* Superficies semánticas suaves */
-html.theme-light [class*="bg-cyan-950"],
-html.theme-light [class*="bg-cyan-900"] {
+/* 7. Superficies semánticas suaves (solo clases base, nunca disabled: o hover:) */
+html.theme-light :is(
+  .bg-cyan-950,
+  .bg-cyan-950\/20,
+  .bg-cyan-950\/30,
+  .bg-cyan-950\/50,
+  .bg-cyan-950\/60,
+  .bg-cyan-950\/70,
+  .bg-cyan-950\/80,
+  .bg-cyan-950\/90,
+  .bg-cyan-900,
+  .bg-cyan-900\/50,
+  .bg-cyan-900\/60,
+  .bg-cyan-900\/80,
+  .bg-cyan-900\/90
+) {
   background-color: #ecfeff;
 }
-html.theme-light [class*="bg-emerald-950"],
-html.theme-light [class*="bg-emerald-900"] {
+
+html.theme-light :is(
+  .bg-emerald-950,
+  .bg-emerald-950\/20,
+  .bg-emerald-950\/40,
+  .bg-emerald-950\/50,
+  .bg-emerald-950\/60,
+  .bg-emerald-950\/70,
+  .bg-emerald-950\/80,
+  .bg-emerald-950\/90,
+  .bg-emerald-950\/95,
+  .bg-emerald-900,
+  .bg-emerald-900\/50,
+  .bg-emerald-900\/60
+) {
   background-color: #ecfdf5;
 }
-html.theme-light [class*="bg-amber-950"],
-html.theme-light [class*="bg-amber-900"] {
+
+html.theme-light :is(
+  .bg-amber-950,
+  .bg-amber-950\/20,
+  .bg-amber-950\/30,
+  .bg-amber-950\/40,
+  .bg-amber-950\/50,
+  .bg-amber-950\/60,
+  .bg-amber-950\/70,
+  .bg-amber-950\/80,
+  .bg-amber-950\/90,
+  .bg-amber-900,
+  .bg-amber-900\/60,
+  .bg-amber-900\/80
+) {
   background-color: #fffbeb;
 }
-html.theme-light [class*="bg-rose-950"],
-html.theme-light [class*="bg-rose-900"],
-html.theme-light [class*="bg-red-950"],
-html.theme-light [class*="bg-red-900"] {
+
+html.theme-light :is(
+  .bg-rose-950,
+  .bg-rose-950\/20,
+  .bg-rose-950\/40,
+  .bg-rose-950\/50,
+  .bg-rose-950\/60,
+  .bg-rose-950\/70,
+  .bg-rose-950\/80,
+  .bg-rose-950\/90,
+  .bg-rose-950\/95,
+  .bg-rose-900,
+  .bg-rose-900\/60,
+  .bg-rose-900\/80,
+  .bg-rose-900\/90,
+  .bg-red-950,
+  .bg-red-950\/90,
+  .bg-red-900,
+  .bg-red-900\/80
+) {
   background-color: #fff1f2;
 }
-html.theme-light [class*="bg-purple-950"],
-html.theme-light [class*="bg-purple-900"] {
+
+html.theme-light :is(
+  .bg-purple-950,
+  .bg-purple-950\/20,
+  .bg-purple-950\/30,
+  .bg-purple-950\/40,
+  .bg-purple-950\/50,
+  .bg-purple-950\/60,
+  .bg-purple-950\/70,
+  .bg-purple-950\/80,
+  .bg-purple-950\/90,
+  .bg-purple-900,
+  .bg-purple-900\/60,
+  .bg-purple-900\/70,
+  .bg-purple-900\/80
+) {
   background-color: #faf5ff;
 }
-html.theme-light [class*="bg-blue-950"] {
+
+html.theme-light :is(.bg-blue-950, .bg-blue-950\/60, .bg-blue-950\/80) {
   background-color: #eff6ff;
 }
 
-/* Gradientes de tarjetas de sensores (DualReadingSensorCards) */
-html.theme-light [class*="from-emerald-950"] {
-  --tw-gradient-from: #ecfdf5;
-}
-html.theme-light [class*="from-amber-950"] {
-  --tw-gradient-from: #fffbeb;
-}
-html.theme-light [class*="from-rose-950"] {
-  --tw-gradient-from: #fff1f2;
-}
-html.theme-light [class*="to-slate-900"] {
-  --tw-gradient-to: #ffffff;
-}
-html.theme-light [class*="to-cyan-950"] {
-  --tw-gradient-to: #ecfeff;
-}
-html.theme-light [class*="to-purple-950"] {
-  --tw-gradient-to: #faf5ff;
+html.theme-light .bg-teal-950 {
+  background-color: #f0fdfa;
 }
 
-/* Bordes semánticos legibles en fondo claro */
-html.theme-light [class*="border-cyan-800"],
-html.theme-light [class*="border-cyan-700"],
-html.theme-light [class*="border-cyan-900"],
-html.theme-light [class*="border-cyan-950"] {
+/* 8. Bordes semánticos */
+html.theme-light :is(
+  .border-cyan-800,
+  .border-cyan-800\/40,
+  .border-cyan-800\/50,
+  .border-cyan-800\/60,
+  .border-cyan-800\/70,
+  .border-cyan-800\/80,
+  .border-cyan-700,
+  .border-cyan-700\/50,
+  .border-cyan-700\/60,
+  .border-cyan-700\/70,
+  .border-cyan-900\/30,
+  .border-cyan-900\/40,
+  .border-cyan-950\/70
+) {
   border-color: #67e8f9;
 }
-html.theme-light [class*="border-emerald-800"],
-html.theme-light [class*="border-emerald-700"],
-html.theme-light [class*="border-emerald-900"] {
+
+html.theme-light :is(
+  .border-emerald-800,
+  .border-emerald-800\/40,
+  .border-emerald-800\/60,
+  .border-emerald-800\/70,
+  .border-emerald-800\/80,
+  .border-emerald-700,
+  .border-emerald-700\/60,
+  .border-emerald-700\/80,
+  .border-emerald-900\/30,
+  .border-emerald-900\/60
+) {
   border-color: #6ee7b7;
 }
-html.theme-light [class*="border-amber-800"],
-html.theme-light [class*="border-amber-700"],
-html.theme-light [class*="border-amber-900"] {
+
+html.theme-light :is(
+  .border-amber-800,
+  .border-amber-800\/40,
+  .border-amber-800\/60,
+  .border-amber-800\/70,
+  .border-amber-800\/80,
+  .border-amber-700,
+  .border-amber-700\/60,
+  .border-amber-700\/70,
+  .border-amber-700\/80,
+  .border-amber-900,
+  .border-amber-900\/30,
+  .border-amber-900\/40,
+  .border-amber-900\/60
+) {
   border-color: #fcd34d;
 }
-html.theme-light [class*="border-rose-800"],
-html.theme-light [class*="border-rose-700"],
-html.theme-light [class*="border-rose-900"],
-html.theme-light [class*="border-red-800"],
-html.theme-light [class*="border-red-700"],
-html.theme-light [class*="border-red-900"] {
+
+html.theme-light :is(
+  .border-rose-800,
+  .border-rose-800\/60,
+  .border-rose-800\/70,
+  .border-rose-800\/80,
+  .border-rose-700,
+  .border-rose-700\/40,
+  .border-rose-700\/60,
+  .border-rose-700\/80,
+  .border-rose-900\/40,
+  .border-rose-900\/60,
+  .border-red-700,
+  .border-red-800,
+  .border-red-900,
+  .border-red-900\/50
+) {
   border-color: #fda4af;
 }
-html.theme-light [class*="border-purple-800"],
-html.theme-light [class*="border-purple-700"],
-html.theme-light [class*="border-purple-900"] {
+
+html.theme-light :is(
+  .border-purple-800,
+  .border-purple-800\/40,
+  .border-purple-800\/60,
+  .border-purple-800\/80,
+  .border-purple-700,
+  .border-purple-700\/50,
+  .border-purple-700\/70,
+  .border-purple-900\/40,
+  .border-purple-900\/50
+) {
   border-color: #d8b4fe;
 }
-html.theme-light [class*="border-blue-800"],
-html.theme-light [class*="border-blue-700"],
-html.theme-light [class*="border-blue-900"] {
+
+html.theme-light :is(.border-blue-800, .border-blue-800\/60, .border-blue-700\/60, .border-blue-900\/30) {
   border-color: #93c5fd;
 }
 
-/* Tipografía neutra en modo claro */
-html.theme-light .text-slate-100,
-html.theme-light .text-slate-200 {
+/* 9. Tipografía neutra */
+html.theme-light :is(.text-slate-100, .text-slate-200) {
   color: #0f172a;
 }
 html.theme-light .text-slate-300 {
@@ -295,35 +452,49 @@ html.theme-light .text-slate-500 {
   color: #64748b;
 }
 
-/* text-white oscuro sobre tarjetas claras, preservando blanco en botones/banners sólidos */
-html.theme-light .text-white:not([class*="bg-cyan-6"]):not([class*="bg-cyan-5"]):not([class*="bg-emerald-6"]):not([class*="bg-emerald-7"]):not([class*="bg-rose-6"]):not([class*="bg-red-6"]):not([class*="bg-amber-6"]):not([class*="bg-purple-6"]):not([class*="bg-blue-6"]):not(.from-cyan-500):not(.from-cyan-600):not(.from-purple-600):not(.from-amber-600) {
+/* text-white oscuro sobre tarjetas claras */
+html.theme-light .text-white {
   color: #0f172a;
 }
 
-html.theme-light .bg-red-600,
-html.theme-light .bg-red-600 *,
-html.theme-light .bg-rose-600,
-html.theme-light .bg-rose-600 *,
-html.theme-light .bg-amber-600,
-html.theme-light .bg-amber-600 *,
+/* 10. Botones de acción sólidos y badges de marca mantienen su color vibrante y texto blanco */
 html.theme-light .bg-cyan-600,
 html.theme-light .bg-cyan-600 *,
+html.theme-light .bg-cyan-700,
+html.theme-light .bg-cyan-700 *,
 html.theme-light .bg-emerald-600,
 html.theme-light .bg-emerald-600 *,
 html.theme-light .bg-emerald-700,
 html.theme-light .bg-emerald-700 *,
+html.theme-light .bg-rose-600,
+html.theme-light .bg-rose-600 *,
+html.theme-light .bg-rose-600\/90,
+html.theme-light .bg-rose-600\/90 *,
+html.theme-light .bg-red-600,
+html.theme-light .bg-red-600 *,
+html.theme-light .bg-amber-600,
+html.theme-light .bg-amber-600 *,
 html.theme-light .bg-purple-600,
 html.theme-light .bg-purple-600 *,
-html.theme-light .from-cyan-500.to-blue-700 .text-white,
+html.theme-light .from-cyan-500.to-blue-700,
+html.theme-light .from-cyan-500.to-blue-700 *,
 html.theme-light .from-purple-600.to-indigo-800,
+html.theme-light .from-purple-600.to-indigo-800 *,
 html.theme-light .from-cyan-600.to-blue-800,
-html.theme-light .from-amber-600.to-orange-700 {
+html.theme-light .from-cyan-600.to-blue-800 *,
+html.theme-light .from-amber-600.to-orange-700,
+html.theme-light .from-amber-600.to-orange-700 * {
   color: #ffffff;
 }
 
-/* Preservar badge oscuro/blanco legible dentro de barras de emergencia sólidas */
-html.theme-light .bg-red-600 [class*="bg-black"],
-html.theme-light .bg-amber-600 [class*="bg-black"] {
+html.theme-light .bg-cyan-600:disabled,
+html.theme-light .bg-emerald-600:disabled,
+html.theme-light .bg-rose-600:disabled {
+  opacity: 0.55;
+}
+
+/* Preservar píldoras informativas dentro de banners de emergencia rojos/ámbar */
+html.theme-light :is(.bg-red-600, .bg-amber-600) :is(.bg-black\/40, .bg-black\/50) {
   background-color: rgba(15, 23, 42, 0.72);
   color: #ffffff;
 }
@@ -331,64 +502,53 @@ html.theme-light .bg-red-600 .bg-white {
   background-color: #ffffff;
   color: #b91c1c;
 }
+html.theme-light .bg-amber-600 .bg-black {
+  background-color: #0f172a;
+  color: #fcd34d;
+}
 
-/* Colores de texto semánticos oscuros para alto contraste sobre fondo claro */
-html.theme-light [class*="text-cyan-100"],
-html.theme-light [class*="text-cyan-200"],
-html.theme-light [class*="text-cyan-300"],
-html.theme-light [class*="text-cyan-400"] {
+/* 11. Colores de texto semánticos oscuros para alto contraste sobre fondo claro */
+html.theme-light :is(.text-cyan-100, .text-cyan-200, .text-cyan-200\/70, .text-cyan-200\/90, .text-cyan-300, .text-cyan-300\/80, .text-cyan-400, .text-cyan-400\/80, .text-cyan-400\/90) {
   color: #0e7490;
 }
 
-html.theme-light [class*="text-emerald-100"],
-html.theme-light [class*="text-emerald-200"],
-html.theme-light [class*="text-emerald-300"],
-html.theme-light [class*="text-emerald-400"] {
+html.theme-light :is(.text-emerald-100, .text-emerald-200, .text-emerald-300, .text-emerald-300\/80, .text-emerald-400, .text-emerald-400\/70) {
   color: #047857;
 }
 
-html.theme-light [class*="text-amber-100"],
-html.theme-light [class*="text-amber-200"],
-html.theme-light [class*="text-amber-300"],
-html.theme-light [class*="text-amber-400"] {
+html.theme-light :is(.text-amber-100, .text-amber-200, .text-amber-200\/90, .text-amber-300, .text-amber-300\/80, .text-amber-300\/90, .text-amber-400) {
   color: #b45309;
 }
 
-html.theme-light [class*="text-rose-100"],
-html.theme-light [class*="text-rose-200"],
-html.theme-light [class*="text-rose-300"],
-html.theme-light [class*="text-rose-400"],
-html.theme-light [class*="text-red-100"],
-html.theme-light [class*="text-red-300"],
-html.theme-light [class*="text-red-400"] {
+html.theme-light :is(.text-rose-100, .text-rose-200, .text-rose-200\/90, .text-rose-300, .text-rose-400, .text-rose-400\/70, .text-red-100, .text-red-300, .text-red-400) {
   color: #be123c;
 }
 
-html.theme-light [class*="text-purple-100"],
-html.theme-light [class*="text-purple-200"],
-html.theme-light [class*="text-purple-300"],
-html.theme-light [class*="text-purple-400"] {
+html.theme-light :is(.text-purple-100, .text-purple-200, .text-purple-200\/90, .text-purple-300, .text-purple-300\/80, .text-purple-400) {
   color: #6d28d9;
 }
 
-html.theme-light [class*="text-blue-300"],
-html.theme-light [class*="text-blue-400"] {
+html.theme-light :is(.text-blue-300, .text-blue-400) {
   color: #1d4ed8;
 }
 
-html.theme-light [class*="text-orange-200"],
-html.theme-light [class*="text-orange-300"],
-html.theme-light [class*="text-orange-400"] {
+html.theme-light .text-teal-300 {
+  color: #0f766e;
+}
+
+html.theme-light .border-teal-800 {
+  border-color: #5eead4;
+}
+
+html.theme-light :is(.text-orange-200, .text-orange-300, .text-orange-400) {
   color: #c2410c;
 }
 
-html.theme-light [class*="text-yellow-200"],
-html.theme-light [class*="text-yellow-300"],
-html.theme-light [class*="text-yellow-400"] {
+html.theme-light :is(.text-yellow-200, .text-yellow-300, .text-yellow-400) {
   color: #a16207;
 }
 
-/* Líneas de grilla de gráficos SVG en modo claro */
+/* 12. Líneas de grilla de gráficos SVG en modo claro */
 html.theme-light svg line[stroke="#1e293b"] {
   stroke: #cbd5e1;
 }
