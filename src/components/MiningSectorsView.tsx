@@ -30,11 +30,13 @@ import {
   PRELOADED_FAENA_PRESETS,
 } from '../data/chileGeography';
 import { soundAlert } from '../services/audioAlert';
+import { DEFAULT_ORGANIZATION } from '../services/firebase';
 
 interface MiningSectorsViewProps {
   currentSite: MiningSite;
   allSites: MiningSite[];
   assignments?: WorkerAssignment[];
+  activeOrganizationId?: string;
   onSelectSite: (siteId: string) => void;
   onAddSite: (newSite: MiningSite) => void;
   onUpdateSite?: (updatedSite: MiningSite) => void;
@@ -81,11 +83,16 @@ export const MiningSectorsView: React.FC<MiningSectorsViewProps> = ({
   currentSite,
   allSites,
   assignments = [],
+  activeOrganizationId,
   onSelectSite,
   onAddSite,
   onUpdateSite,
   onNavigateTab,
 }) => {
+  const effectiveOrgId =
+    activeOrganizationId && activeOrganizationId !== 'all'
+      ? activeOrganizationId
+      : DEFAULT_ORGANIZATION.id;
   const [selectedSectorId, setSelectedSectorId] = useState<string>(
     currentSite.activeSectors[0]?.id || ''
   );
@@ -284,6 +291,7 @@ export const MiningSectorsView: React.FC<MiningSectorsViewProps> = ({
 
     const newSite: MiningSite = {
       id: `site-${timestamp}`,
+      organizationId: effectiveOrgId,
       name: newName.trim(),
       company: newCompany.trim(),
       comuna: finalComuna,
@@ -472,6 +480,7 @@ export const MiningSectorsView: React.FC<MiningSectorsViewProps> = ({
       const ts = Date.now();
       const loadedSite: MiningSite = {
         id: `site-${preset.id}`,
+        organizationId: effectiveOrgId,
         name: preset.name,
         company: preset.company,
         comuna: preset.comuna,

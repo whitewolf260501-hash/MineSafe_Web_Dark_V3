@@ -51,6 +51,7 @@ interface ESP32GatewaySectionProps {
   onToggleLight?: () => void;
   isSuperAdmin?: boolean;
   currentUser?: UserProfile | null;
+  timeoutSeconds?: number;
 }
 
 export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
@@ -65,6 +66,7 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
   onToggleLight,
   isSuperAdmin = false,
   currentUser = null,
+  timeoutSeconds = 20,
 }) => {
   const [localIp, setLocalIp] = useState('192.168.4.1');
   const [isEditingIp, setIsEditingIp] = useState(false);
@@ -92,12 +94,12 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
     }
   }, [currentDevice?.id, currentDevice?.localIp]);
 
-  // 20 seconds rule calculation
+  const effectiveTimeout = Math.max(5, Number(timeoutSeconds) || 20);
   const serverTime = currentDevice?.lastUpdateServer || 0;
   const diffSeconds = serverTime > 0 ? Math.floor(Math.abs(nowTimestamp - serverTime) / 1000) : 999;
 
-  // Connection status: live RTDB packet within 20 seconds or gatewayOnline flag
-  const isOnline = Boolean(currentDevice?.gatewayOnline) || (serverTime > 0 && diffSeconds <= 20) || isSimulatingHeartbeat;
+  // Connection status: live RTDB packet within effectiveTimeout seconds or gatewayOnline flag
+  const isOnline = Boolean(currentDevice?.gatewayOnline) || (serverTime > 0 && diffSeconds <= effectiveTimeout) || isSimulatingHeartbeat;
 
   // Format date and time
   const formatReportDate = (timestamp: number) => {
@@ -386,7 +388,7 @@ export const ESP32GatewaySection: React.FC<ESP32GatewaySectionProps> = ({
           </div>
 
           <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-900">
-            <span>Ventana &lt; 15s:</span>
+            <span>Ventana &lt; {effectiveTimeout}s:</span>
             <span className={`font-mono font-bold ${isOnline ? 'text-emerald-400' : 'text-rose-400'}`}>
               {diffSeconds < 999 ? `${diffSeconds} seg transcurridos` : 'Sin latido reciente'}
             </span>

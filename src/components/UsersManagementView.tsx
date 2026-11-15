@@ -18,12 +18,19 @@ import {
   ShieldCheck,
   AlertCircle
 } from 'lucide-react';
-import { UserProfile, UserRole } from '../types';
+import { Organization, UserProfile, UserRole } from '../types';
 import { soundAlert } from '../services/audioAlert';
+import {
+  createUserAccountByAdmin,
+  sendPasswordResetWithFirebase,
+  DEFAULT_ORGANIZATION,
+} from '../services/firebase';
 
 interface UsersManagementViewProps {
   currentUser: UserProfile;
   usersList: UserProfile[];
+  organizations?: Organization[];
+  activeOrganizationId?: string;
   onAddUser: (newUser: UserProfile) => void;
   onUpdateUserRole: (userId: string, newRole: UserRole) => void;
   onToggleUserStatus: (userId: string) => void;
@@ -32,6 +39,8 @@ interface UsersManagementViewProps {
 export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
   currentUser,
   usersList,
+  organizations = [],
+  activeOrganizationId,
   onAddUser,
   onUpdateUserRole,
   onToggleUserStatus,
@@ -47,6 +56,14 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
   const [newRut, setNewRut] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('operador');
   const [newShift, setNewShift] = useState('Turno Mañana (07:00 - 15:30)');
+  const [createRealAuth, setCreateRealAuth] = useState(true);
+  const [newPassword, setNewPassword] = useState('');
+  const [sendResetEmail, setSendResetEmail] = useState(true);
+  const [newOrganizationId, setNewOrganizationId] = useState<string>(
+    activeOrganizationId && activeOrganizationId !== 'all' ? activeOrganizationId : DEFAULT_ORGANIZATION.id
+  );
+  const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const isSuperAdmin = currentUser.role === 'superadmin';
   const isAdminOrSuper = currentUser.role === 'superadmin' || currentUser.role === 'admin';
@@ -99,12 +116,65 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
     );
   };
 
-  const handleCreateUser = (e: React.FormEvent) => {
+  const handleSendPasswordReset = async (targetUser: UserProfile) => {
+    try {
+      await sendPasswordResetWithFirebase(targetUser.email);
+      soundAlert.playFeedbackBeep();
+      showToast('success', `Correo de restablecimiento de clave enviado a ${targetUser.email}.`);
+    } catch (err: any) {
+      showToast('error', err?.message || 'No se pudo enviar el correo de restablecimiento.');
+    }
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName || !newEmail) return;
+    setCreateError(null);
+    if (!newName.trim() || !newEmail.trim()) return;
 
     // Garantizar que nunca se cree un segundo superadmin
-    const safeRole: UserRole = newRole === 'superadmin' ? 'admin' : newRole;
+    const safeRole: 'admin' | 'operador' = newRole === 'admin' ? 'admin' : 'operador';
+    const targetOrgId =
+      newOrganizationId ||
+      (activeOrganizationId && activeOrganizationId !== 'all'
+        ? activeOrganizationId
+        : DEFAULT_ORGANIZATION.id);
+
+    if (createRealAuth) {
+      if (newPassword.length < 6) {
+        setCreateError('La contraseña inicial debe tener al menos 6 caracteres.');
+        return;
+      }
+      setIsCreating(true);
+      try {
+        const created = await createUserAccountByAdmin({
+          name: newName,
+          email: newEmail,
+          password: newPassword,
+          role: safeRole,
+          rut: newRut,
+          shift: newShift,
+          assignedSector: 'Faena Minera Central',
+          organizationId: targetOrgId,
+          sendResetEmail,
+        });
+        soundAlert.playFeedbackBeep();
+        showToast(
+          'success',
+          `Cuenta Firebase Auth y perfil RTDB creados para ${created.name} (${safeRole}).`
+        );
+        setShowAddModal(false);
+        setNewName('');
+        setNewEmail('');
+        setNewRut('');
+        setNewPassword('');
+        setNewRole('operador');
+      } catch (err: any) {
+        setCreateError(err?.message || 'Error al crear usuario en Firebase Auth.');
+      } finally {
+        setIsCreating(false);
+      }
+      return;
+    }
 
     const roleLabels: Record<UserRole, string> = {
       superadmin: 'Super Administrador de Seguridad Minera',
@@ -114,23 +184,25 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
 
     const created: UserProfile = {
       id: `usr-${Date.now()}`,
-      name: newName,
-      email: newEmail,
+      organizationId: targetOrgId,
+      name: newName.trim(),
+      email: newEmail.trim(),
       role: safeRole,
       roleLabel: roleLabels[safeRole],
-      rut: newRut || '18.123.456-7',
+      rut: newRut.trim() || 'No registrado',
       shift: newShift,
       status: 'activo',
-      lastLogin: 'Nunca',
+      lastLogin: 'Pre-registro administrativo (sin clave Auth)',
     };
 
     onAddUser(created);
     soundAlert.playFeedbackBeep();
-    showToast('success', `Usuario ${created.name} creado con rol ${safeRole === 'admin' ? 'Administrador' : 'Operador'}.`);
+    showToast('success', `Perfil RTDB de ${created.name} guardado (${safeRole}).`);
     setShowAddModal(false);
     setNewName('');
     setNewEmail('');
     setNewRut('');
+    setNewPassword('');
     setNewRole('operador');
   };
 
@@ -178,7 +250,15 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
 
           {isAdminOrSuper && (
             <button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => {
+                setCreateError(null);
+                setNewOrganizationId(
+                  activeOrganizationId && activeOrganizationId !== 'all'
+                    ? activeOrganizationId
+                    : DEFAULT_ORGANIZATION.id
+                );
+                setShowAddModal(true);
+              }}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition-colors"
             >
               <Plus className="w-4 h-4" />
@@ -340,7 +420,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
                           <span>{isCurrentSession ? 'Sesión actual (Protegida)' : 'SuperAdmin Protegido'}</span>
                         </span>
                       ) : canModifyTarget ? (
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <select
                             value={user.role}
                             onChange={(e) => handleRoleSelectChange(user, e.target.value as UserRole)}
@@ -357,6 +437,17 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
                           >
                             {user.status === 'activo' ? 'Desactivar' : 'Activar'}
                           </button>
+                          {user.email && (
+                            <button
+                              type="button"
+                              onClick={() => handleSendPasswordReset(user)}
+                              title="Enviar correo oficial de restablecimiento de contraseña vía Firebase Auth"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-[10px] font-semibold"
+                            >
+                              <Mail className="w-3 h-3" />
+                              Reset Clave
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <span className="text-slate-500 text-[11px]">
@@ -452,19 +543,86 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
                 />
               </div>
 
+              {organizations.length > 0 && (
+                <div>
+                  <label className="text-slate-300 block mb-1">Organización / Empresa</label>
+                  <select
+                    value={newOrganizationId}
+                    onChange={(e) => setNewOrganizationId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
+                  >
+                    {organizations.map((org) => (
+                      <option key={org.id} value={org.id}>
+                        {org.name} ({org.rut || org.id})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+                <label className="flex items-center gap-2 cursor-pointer text-slate-200 font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={createRealAuth}
+                    onChange={(e) => setCreateRealAuth(e.target.checked)}
+                    className="rounded border-slate-600 bg-slate-900 text-cyan-500"
+                  />
+                  <span>Crear credenciales reales en Firebase Authentication</span>
+                </label>
+
+                {createRealAuth ? (
+                  <div className="space-y-2 pt-1">
+                    <div>
+                      <label className="text-slate-300 block mb-1">Contraseña Inicial (mín. 6 caracteres)</label>
+                      <input
+                        type="password"
+                        required
+                        minLength={6}
+                        placeholder="••••••••"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer text-[11px] text-slate-400">
+                      <input
+                        type="checkbox"
+                        checked={sendResetEmail}
+                        onChange={(e) => setSendResetEmail(e.target.checked)}
+                        className="rounded border-slate-600 bg-slate-900 text-cyan-500"
+                      />
+                      <span>Enviar correo automático de activación / cambio de clave</span>
+                    </label>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-amber-300">
+                    Modo solo perfil RTDB: el usuario no podrá iniciar sesión hasta completar su registro en Firebase Auth o usar Google Sign-In.
+                  </p>
+                )}
+              </div>
+
+              {createError && (
+                <div className="p-2.5 rounded-lg bg-rose-950/80 border border-rose-700 text-rose-200 text-[11px]">
+                  {createError}
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
+                  disabled={isCreating}
                   className="px-4 py-2 text-slate-300 bg-slate-800 rounded-lg"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 text-white bg-cyan-600 hover:bg-cyan-500 rounded-lg font-semibold"
+                  disabled={isCreating}
+                  className="px-4 py-2 text-white bg-cyan-600 hover:bg-cyan-500 rounded-lg font-semibold disabled:opacity-50"
                 >
-                  Crear Usuario
+                  {isCreating ? 'Creando en Firebase...' : 'Crear Usuario'}
                 </button>
               </div>
             </form>

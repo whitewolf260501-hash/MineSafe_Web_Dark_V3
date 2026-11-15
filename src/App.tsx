@@ -27,7 +27,10 @@ import {
   UserRole,
   AlertResolutionDetails,
   DrillDebriefRecord,
-  PlatformConfig
+  PlatformConfig,
+  Organization,
+  TelemetryHistoryPoint,
+  AlertEventRecord
 } from './types';
 
 import { 
@@ -41,15 +44,23 @@ import {
 
 import { 
   testConnection, 
-  subscribeToRTDBDevices, 
+  subscribeToRTDBDevicesRaw,
+  forceRefreshDevicesFromRTDB,
+  mapRTDBDeviceToSensorDevice,
   subscribeToRTDBUsers, 
   subscribeToRTDBRentals,
-  updateDeviceInRTDB,
+  subscribeToRTDBOrganizations,
+  subscribeToRTDBAssignments,
+  saveAssignmentToRTDB,
+  subscribeToAllThresholdConfigs,
+  subscribeToAlertEvents,
+  recordTelemetryHistoryPoint,
+  subscribeToTelemetryHistory,
+  DEFAULT_ORGANIZATION,
   addUserToRTDB,
   updateUserInRTDB,
   addRentalContractToRTDB,
   recordPaymentInRTDB,
-  USER_RTDB_URL,
   toggleGatewayAlarmInRTDB,
   shutdownAlarmCompletelyInRTDB,
   toggleGatewayLightInRTDB,
@@ -80,6 +91,7 @@ import { ShieldAlert, AlertTriangle, X, Megaphone, Lock, CheckCircle2 } from 'lu
 const INITIAL_SINGLE_DEVICE: SensorDevice = {
   id: 'device_38A839E81F84',
   code: 'device_38A839E81F84',
+  organizationId: DEFAULT_ORGANIZATION.id,
   name: 'Nodo Sensor & Gateway Principal (1F84)',
   type: 'estacion_fija',
   sectorId: 'sec-device_38A839E81F84',
@@ -109,9 +121,15 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
   const [variables, setVariables] = useState<TelemetryVariable[]>(INITIAL_VARIABLES);
   const [devices, setDevices] = useState<SensorDevice[]>([INITIAL_SINGLE_DEVICE]);
-  const [alerts, setAlerts] = useState<SafetyAlert[]>(INITIAL_ALERTS);
-  const alertsRef = React.useRef<SafetyAlert[]>(INITIAL_ALERTS);
+  const [alerts, setAlerts] = useState<SafetyAlert[]>([]);
+  const alertsRef = React.useRef<SafetyAlert[]>([]);
   alertsRef.current = alerts;
+  const rawDevicesRef = React.useRef<Record<string, any>>({});
+  const timeoutSecondsRef = React.useRef<number>(DEFAULT_PLATFORM_CONFIG.metrics.gatewayTimeoutSeconds || 20);
+  const [organizations, setOrganizations] = useState<Organization[]>([DEFAULT_ORGANIZATION]);
+  const [activeOrganizationId, setActiveOrganizationId] = useState<string>('all');
+  const [telemetryHistory, setTelemetryHistory] = useState<TelemetryHistoryPoint[]>([]);
+  const [alertEvents, setAlertEvents] = useState<AlertEventRecord[]>([]);
   const [rentals, setRentals] = useState<DeviceRental[]>(INITIAL_RENTALS);
   const [assignments, setAssignments] = useState<WorkerAssignment[]>(INITIAL_ASSIGNMENTS);
   const [sites, setSites] = useState<MiningSite[]>(() =>
@@ -188,6 +206,9 @@ export default function App() {
     return () => unsubAuth();
   }, []);
 
+  // Keep timeout ref synchronized with SuperAdmin platform metrics
+  timeoutSecondsRef.current = platformConfig.metrics.gatewayTimeoutSeconds || 20;
+
   // Initialize and connect to user's Firebase Realtime Database
   useEffect(() => {
     let unsubDevices: (() => void) | null = null;
@@ -197,16 +218,62 @@ export default function App() {
     let unsubDrill: (() => void) | null = null;
     let unsubPlatform: (() => void) | null = null;
     let unsubSites: (() => void) | null = null;
+    let unsubThresholds: (() => void) | null = null;
+    let unsubAlertEvents: (() => void) | null = null;
+    let unsubOrgs: (() => void) | null = null;
+    let unsubAssignments: (() => void) | null = null;
+
+    const recomputeDevicesFromRaw = () => {
+      const raw = rawDevicesRef.current || {};
+      const keys = Object.keys(raw);
+      if (keys.length === 0) return;
+      const timeout = timeoutSecondsRef.current || 20;
+      const mapped = keys.map((key) => mapRTDBDeviceToSensorDevice(key, raw[key], timeout));
+      setDevices(mapped);
+      mapped.forEach((dev) => {
+        recordTelemetryHistoryPoint(dev).catch(() => {});
+      });
+    };
+
+    const staleCheckInterval = setInterval(recomputeDevicesFromRaw, 2000);
 
     async function initRealtimeDatabase() {
       const connected = await testConnection();
       setIsFirebaseConnected(connected);
 
-      // Realtime listener for Devices & live measurements
-      unsubDevices = subscribeToRTDBDevices((remoteDevices) => {
-        if (remoteDevices && remoteDevices.length > 0) {
-          setDevices(remoteDevices);
-          setIsFirebaseConnected(true);
+      // Realtime raw listener for Devices & live measurements
+      unsubDevices = subscribeToRTDBDevicesRaw((incoming) => {
+        rawDevicesRef.current = incoming || {};
+        setIsFirebaseConnected(true);
+        recomputeDevicesFromRaw();
+      });
+
+      // Global & per-device dynamic threshold configs fed directly to alertEngine
+      unsubThresholds = subscribeToAllThresholdConfigs((configs) => {
+        if (configs.global) {
+          alertEngine.setGlobalConfig(configs.global);
+        }
+        Object.entries(configs).forEach(([id, cfg]) => {
+          if (id !== 'global') {
+            alertEngine.setDeviceConfig(id, cfg);
+          }
+        });
+      });
+
+      // Real threshold event log stream for Sernageomin reports
+      unsubAlertEvents = subscribeToAlertEvents((events) => {
+        setAlertEvents(events);
+      });
+
+      // Organizations stream for multi-tenant isolation
+      unsubOrgs = subscribeToRTDBOrganizations((orgs) => {
+        setOrganizations(orgs);
+      });
+
+      // Worker assignments stream
+      unsubAssignments = subscribeToRTDBAssignments((remoteAssigns) => {
+        if (remoteAssigns && remoteAssigns.length > 0) {
+          setAssignments(remoteAssigns);
         }
       });
 
@@ -254,13 +321,8 @@ export default function App() {
                 : a.suggestedAction,
           };
         });
-        const remoteIds = new Set(enrichedRemote.map((a) => a.id));
-        const merged = [
-          ...enrichedRemote,
-          ...INITIAL_ALERTS.filter((mockAlert) => !remoteIds.has(mockAlert.id)),
-        ];
-        alertEngine.syncExistingActiveAlerts(merged);
-        setAlerts(merged);
+        alertEngine.syncExistingActiveAlerts(enrichedRemote);
+        setAlerts(enrichedRemote);
       });
 
       // Realtime listener for Drill & Emergency broadcasts (e.g., triggered from Android app)
@@ -271,12 +333,19 @@ export default function App() {
           setIsAlarmActive(true);
           setIsLightActive(true);
           setDismissEmergencyBanner(false);
+        } else {
+          setIsDrillActive(false);
+          setDrillType(null);
+          setIsAlarmActive(false);
+          setIsLightActive(false);
         }
       });
 
       // Realtime listener for SuperAdmin master platform configuration
       unsubPlatform = subscribeToPlatformConfig((cfg) => {
         setPlatformConfig(cfg);
+        timeoutSecondsRef.current = cfg.metrics.gatewayTimeoutSeconds || 20;
+        recomputeDevicesFromRaw();
       });
 
       // Realtime listener for Mining Sites, Sectors & Assigned Crews (/faenas)
@@ -294,6 +363,7 @@ export default function App() {
     initRealtimeDatabase();
 
     return () => {
+      clearInterval(staleCheckInterval);
       if (unsubDevices) unsubDevices();
       if (unsubUsers) unsubUsers();
       if (unsubRentals) unsubRentals();
@@ -301,10 +371,26 @@ export default function App() {
       if (unsubDrill) unsubDrill();
       if (unsubPlatform) unsubPlatform();
       if (unsubSites) unsubSites();
+      if (unsubThresholds) unsubThresholds();
+      if (unsubAlertEvents) unsubAlertEvents();
+      if (unsubOrgs) unsubOrgs();
+      if (unsubAssignments) unsubAssignments();
     };
   }, []);
 
-  // Lista controlada de dispositivos visibles (por defecto solo device_38A839E81F84, editable desde Control Maestro)
+  // Multi-organization scoping: SuperAdmin can switch orgs or inspect all ('all'); Admin/Operador see their own org
+  const effectiveOrgId =
+    currentUser?.role === 'superadmin'
+      ? activeOrganizationId
+      : currentUser?.organizationId || DEFAULT_ORGANIZATION.id;
+
+  const matchesOrg = useCallback(
+    (orgId?: string) =>
+      effectiveOrgId === 'all' || (orgId || DEFAULT_ORGANIZATION.id) === effectiveOrgId,
+    [effectiveOrgId]
+  );
+
+  // Lista controlada de dispositivos visibles (filtrada además por organización activa)
   const visibleDevices = useMemo<SensorDevice[]>(() => {
     const rtdbMap = new Map<string, SensorDevice>(devices.map((d) => [d.id, d]));
     const regList = platformConfig.registeredDevices || DEFAULT_PLATFORM_CONFIG.registeredDevices;
@@ -314,6 +400,7 @@ export default function App() {
       if (existing) {
         return {
           ...existing,
+          organizationId: reg.organizationId || existing.organizationId || DEFAULT_ORGANIZATION.id,
           name: reg.name || existing.name,
           sectorName: reg.sectorName || existing.sectorName,
           deviceCategory: reg.category,
@@ -325,6 +412,7 @@ export default function App() {
       return {
         id: reg.id,
         code: reg.id,
+        organizationId: reg.organizationId || DEFAULT_ORGANIZATION.id,
         name: reg.name,
         type: reg.category === 'sensor' ? 'multigas_portatil' : 'estacion_fija',
         sectorId: `sec-${reg.id}`,
@@ -334,10 +422,6 @@ export default function App() {
         lastPing: 'En espera de telemetría',
         status: 'desconectado',
         assignedTo: 'Pendiente de conexión',
-        rawCO: 0,
-        rawPM25: 0,
-        rawTemp: 22.0,
-        rawHum: 48,
         lastUpdateServer: 0,
         gatewayOnline: false,
         alarmaActiva: false,
@@ -345,24 +429,32 @@ export default function App() {
         parentGatewayId: reg.parentGatewayId,
         localIp: reg.localIp,
         metrics: {
-          temperatura: 22.0,
-          humedad: 48,
-          co2: 450,
+          temperatura: 0,
+          humedad: 0,
+          co2: 0,
           co: 0,
           ch4: 0,
-          o2: 20.9,
-          flujoAire: 1.25,
-          ruido: 65,
+          o2: 0,
+          flujoAire: 0,
+          ruido: 0,
           polvoPM: 0,
         },
       };
     };
 
     if (platformConfig.onlyShowRegisteredDevices) {
-      const enabledRegs = regList.filter((r) => r.enabled !== false);
-      const effectiveRegs = enabledRegs.length > 0 ? enabledRegs : regList.slice(0, 1);
+      const enabledRegs = regList.filter((r) => r.enabled !== false && matchesOrg(r.organizationId));
+      const effectiveRegs =
+        enabledRegs.length > 0
+          ? enabledRegs
+          : effectiveOrgId === 'all'
+          ? regList.slice(0, 1)
+          : [];
       const mapped = effectiveRegs.map(buildFromRegistry);
-      return mapped.length > 0 ? mapped : [INITIAL_SINGLE_DEVICE];
+      if (mapped.length > 0) return mapped;
+      return effectiveOrgId === 'all' || effectiveOrgId === DEFAULT_ORGANIZATION.id
+        ? [INITIAL_SINGLE_DEVICE]
+        : [];
     }
 
     const regMap = new Map(regList.map((r) => [r.id, r]));
@@ -371,6 +463,7 @@ export default function App() {
       if (!reg) return d;
       return {
         ...d,
+        organizationId: reg.organizationId || d.organizationId || DEFAULT_ORGANIZATION.id,
         name: reg.name || d.name,
         sectorName: reg.sectorName || d.sectorName,
         deviceCategory: reg.category,
@@ -381,9 +474,12 @@ export default function App() {
     const missingEnabled = regList
       .filter((r) => r.enabled !== false && !rtdbMap.has(r.id))
       .map(buildFromRegistry);
-    const combined = [...enrichedRTDB, ...missingEnabled];
-    return combined.length > 0 ? combined : [INITIAL_SINGLE_DEVICE];
-  }, [devices, platformConfig]);
+    const combined = [...enrichedRTDB, ...missingEnabled].filter((d) => matchesOrg(d.organizationId));
+    if (combined.length > 0) return combined;
+    return effectiveOrgId === 'all' || effectiveOrgId === DEFAULT_ORGANIZATION.id
+      ? [INITIAL_SINGLE_DEVICE]
+      : [];
+  }, [devices, platformConfig, matchesOrg, effectiveOrgId]);
 
   // Mantener siempre un dispositivo activo válido dentro de los dispositivos visibles
   useEffect(() => {
@@ -392,6 +488,18 @@ export default function App() {
     }
   }, [visibleDevices, activeTelemetryDeviceId]);
 
+  // Suscripción a historial real de telemetría para el nodo activo (últimas 24h)
+  useEffect(() => {
+    if (!activeTelemetryDeviceId) {
+      setTelemetryHistory([]);
+      return;
+    }
+    const unsubHist = subscribeToTelemetryHistory(activeTelemetryDeviceId, 24, (points) => {
+      setTelemetryHistory(points);
+    });
+    return () => unsubHist();
+  }, [activeTelemetryDeviceId]);
+
   // Evaluar mediciones en tiempo real únicamente sobre los dispositivos visibles
   useEffect(() => {
     if (visibleDevices.length > 0) {
@@ -399,17 +507,35 @@ export default function App() {
     }
   }, [visibleDevices]);
 
-  // Synchronize dashboard variables directly with the real active device from RTDB + SuperAdmin metrics config
+  // Synchronize dashboard variables directly with the real active device from RTDB + real telemetry history
   useEffect(() => {
     const targetDev = visibleDevices.find(d => d.id === activeTelemetryDeviceId) || visibleDevices[0];
     const m = platformConfig.metrics;
     if (targetDev && targetDev.metrics) {
-      const tempVal = targetDev.metrics.temperatura;
-      const humVal = targetDev.metrics.humedad;
-      const coVal = targetDev.metrics.co;
-      const pmVal = targetDev.metrics.polvoPM;
+      const faultSet = new Set(targetDev.faultFields || []);
+      const tempVal = faultSet.has('temperatura') ? 0 : targetDev.metrics.temperatura;
+      const humVal = faultSet.has('humedad') ? 0 : targetDev.metrics.humedad;
+      const coVal = faultSet.has('CO') ? 0 : targetDev.metrics.co;
+      const pmVal = faultSet.has('PM2_5') ? 0 : targetDev.metrics.polvoPM;
       const airVal = targetDev.metrics.flujoAire;
       const batVal = targetDev.batteryPct;
+
+      const recentHist = telemetryHistory.slice(-12);
+      const formatTime = (ts: number) =>
+        new Date(ts).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+
+      const buildRealHistory = (
+        extractor: (p: TelemetryHistoryPoint) => number | null,
+        liveVal: number
+      ) => {
+        const valid = recentHist
+          .map((p) => ({ ts: p.timestamp, v: extractor(p) }))
+          .filter((item): item is { ts: number; v: number } => typeof item.v === 'number' && !Number.isNaN(item.v));
+        if (valid.length > 0) {
+          return valid.map((item) => ({ timestamp: formatTime(item.ts), value: Number(item.v.toFixed(1)) }));
+        }
+        return [{ timestamp: 'Actual', value: Number((liveVal || 0).toFixed(1)) }];
+      };
 
       setVariables([
         {
@@ -418,19 +544,26 @@ export default function App() {
           shortName: 'Temperatura',
           value: tempVal,
           unit: '°C',
-          trend: tempVal >= m.tempPreventivo ? 'alza critica' : 'estable',
-          status: tempVal >= m.tempCritico ? 'critico' : tempVal >= m.tempPreventivo ? 'advertencia' : 'normal',
-          statusLabel: tempVal >= m.tempCritico ? 'Crítica' : tempVal >= m.tempPreventivo ? 'Alerta' : 'Estable',
+          trend: !faultSet.has('temperatura') && tempVal >= m.tempPreventivo ? 'alza critica' : 'estable',
+          status: faultSet.has('temperatura')
+            ? 'desconectado'
+            : tempVal >= m.tempCritico
+            ? 'critico'
+            : tempVal >= m.tempPreventivo
+            ? 'advertencia'
+            : 'normal',
+          statusLabel: faultSet.has('temperatura')
+            ? 'Sensor en Falla'
+            : tempVal >= m.tempCritico
+            ? 'Crítica'
+            : tempVal >= m.tempPreventivo
+            ? 'Alerta'
+            : 'Estable',
           thresholdMin: m.tempMin,
           thresholdMax: m.tempPreventivo,
           lastUpdateSeconds: 0,
-          historical: [
-            { timestamp: '00:00', value: Number((tempVal - 1.2).toFixed(1)) },
-            { timestamp: '04:00', value: Number((tempVal - 0.8).toFixed(1)) },
-            { timestamp: '08:00', value: Number((tempVal - 0.3).toFixed(1)) },
-            { timestamp: '12:00', value: Number((tempVal + 0.4).toFixed(1)) },
-            { timestamp: '16:00', value: tempVal },
-          ],
+          isSimulated: false,
+          historical: buildRealHistory((p) => p.temperatura, tempVal),
         },
         {
           id: 'hum',
@@ -439,58 +572,85 @@ export default function App() {
           value: humVal,
           unit: '%',
           trend: 'estable',
-          status: humVal >= m.humCritico ? 'critico' : humVal >= m.humPreventivo ? 'advertencia' : 'normal',
-          statusLabel: humVal >= m.humCritico ? 'Crítica' : humVal >= m.humPreventivo ? 'Elevada' : 'Normal',
+          status: faultSet.has('humedad')
+            ? 'desconectado'
+            : humVal >= m.humCritico
+            ? 'critico'
+            : humVal >= m.humPreventivo
+            ? 'advertencia'
+            : 'normal',
+          statusLabel: faultSet.has('humedad')
+            ? 'Sensor en Falla'
+            : humVal >= m.humCritico
+            ? 'Crítica'
+            : humVal >= m.humPreventivo
+            ? 'Elevada'
+            : 'Normal',
           thresholdMin: m.humMin,
           thresholdMax: m.humCritico,
           lastUpdateSeconds: 0,
-          historical: [
-            { timestamp: '00:00', value: Math.max(0, humVal - 2) },
-            { timestamp: '04:00', value: Math.max(0, humVal - 1) },
-            { timestamp: '08:00', value: humVal },
-            { timestamp: '12:00', value: humVal + 1 },
-            { timestamp: '16:00', value: humVal },
-          ],
+          isSimulated: false,
+          historical: buildRealHistory((p) => p.humedad, humVal),
         },
         {
           id: 'co2',
-          name: 'MONÓXIDO DE CARBONO (CO)',
-          shortName: 'Gas CO',
+          name: 'GASES / CO (MQ-2 ADC)',
+          shortName: 'Gas MQ-2',
           value: coVal,
-          unit: 'ppm',
-          trend: coVal >= m.coChartSafeMax ? 'alza critica' : 'estable',
-          status: coVal >= m.coChartSafeMax * 1.5 ? 'critico' : coVal >= m.coChartSafeMax ? 'advertencia' : 'normal',
-          statusLabel: coVal >= m.coChartSafeMax * 1.5 ? 'Crítico (DS 132)' : coVal >= m.coChartSafeMax ? 'Preventivo' : 'Seguro',
+          unit: 'ADC',
+          trend: !faultSet.has('CO') && coVal >= m.coPreventivo ? 'alza critica' : 'estable',
+          status: faultSet.has('CO')
+            ? 'desconectado'
+            : coVal >= m.coCritico
+            ? 'critico'
+            : coVal >= m.coAdvertencia
+            ? 'advertencia'
+            : coVal >= m.coPreventivo
+            ? 'preventivo'
+            : 'normal',
+          statusLabel: faultSet.has('CO')
+            ? 'Sensor en Falla'
+            : coVal >= m.coCritico
+            ? 'Crítico'
+            : coVal >= m.coAdvertencia
+            ? 'Advertencia'
+            : coVal >= m.coPreventivo
+            ? 'Preventivo'
+            : 'Seguro',
           thresholdMin: 0,
-          thresholdMax: m.coChartSafeMax,
+          thresholdMax: m.coAdvertencia,
           lastUpdateSeconds: 0,
-          historical: [
-            { timestamp: '00:00', value: Math.max(0, coVal - 10) },
-            { timestamp: '04:00', value: Math.max(0, coVal - 5) },
-            { timestamp: '08:00', value: coVal },
-            { timestamp: '12:00', value: coVal },
-            { timestamp: '16:00', value: coVal },
-          ],
+          isSimulated: false,
+          historical: buildRealHistory((p) => p.co, coVal),
         },
         {
           id: 'lux',
-          name: 'MATERIAL PARTICULADO (PM2.5)',
+          name: 'MATERIAL PARTICULADO (PM2.5 ADC)',
           shortName: 'Polvo PM2.5',
           value: pmVal,
-          unit: 'µg/m³',
-          trend: pmVal >= m.pm25Critico ? 'alza critica' : 'estable',
-          status: pmVal >= m.pm25Critico ? 'critico' : pmVal >= m.pm25Preventivo ? 'advertencia' : 'normal',
-          statusLabel: pmVal >= m.pm25Critico ? 'Polvo Elevado' : pmVal >= m.pm25Preventivo ? 'Preventivo' : 'Norma OK',
+          unit: 'ADC',
+          trend: !faultSet.has('PM2_5') && pmVal >= m.pm25Preventivo ? 'alza critica' : 'estable',
+          status: faultSet.has('PM2_5')
+            ? 'desconectado'
+            : pmVal >= m.pm25Critico
+            ? 'critico'
+            : pmVal >= m.pm25Advertencia
+            ? 'advertencia'
+            : pmVal >= m.pm25Preventivo
+            ? 'preventivo'
+            : 'normal',
+          statusLabel: faultSet.has('PM2_5')
+            ? 'Sensor en Falla'
+            : pmVal >= m.pm25Critico
+            ? 'Polvo Crítico'
+            : pmVal >= m.pm25Preventivo
+            ? 'Preventivo'
+            : 'Norma OK',
           thresholdMin: 0,
-          thresholdMax: m.pm25ChartSafeMax,
+          thresholdMax: m.pm25Advertencia,
           lastUpdateSeconds: 0,
-          historical: [
-            { timestamp: '00:00', value: Math.max(0, pmVal - 100) },
-            { timestamp: '04:00', value: pmVal },
-            { timestamp: '08:00', value: pmVal },
-            { timestamp: '12:00', value: pmVal },
-            { timestamp: '16:00', value: pmVal },
-          ],
+          isSimulated: false,
+          historical: buildRealHistory((p) => p.pm25, pmVal),
         },
         {
           id: 'kwh',
@@ -504,13 +664,8 @@ export default function App() {
           thresholdMin: m.batteryMin,
           thresholdMax: 100,
           lastUpdateSeconds: 0,
-          historical: [
-            { timestamp: '00:00', value: 98 },
-            { timestamp: '04:00', value: 97 },
-            { timestamp: '08:00', value: 96 },
-            { timestamp: '12:00', value: batVal },
-            { timestamp: '16:00', value: batVal },
-          ],
+          isSimulated: false,
+          historical: [{ timestamp: 'Actual', value: batVal }],
         },
         {
           id: 'air_flow',
@@ -519,22 +674,17 @@ export default function App() {
           value: airVal,
           unit: 'm/s',
           trend: 'estable',
-          status: airVal < m.airFlowMin ? 'critico' : 'normal',
-          statusLabel: airVal < m.airFlowMin ? 'Flujo Insuficiente' : 'Circulación Activa',
+          status: airVal > 0 && airVal < m.airFlowMin ? 'critico' : 'normal',
+          statusLabel: airVal === 0 ? 'Sin sensor flujo' : airVal < m.airFlowMin ? 'Flujo Insuficiente' : 'Circulación Activa',
           thresholdMin: m.airFlowMin,
           thresholdMax: m.airFlowMax,
           lastUpdateSeconds: 0,
-          historical: [
-            { timestamp: '00:00', value: 1.2 },
-            { timestamp: '04:00', value: 1.3 },
-            { timestamp: '08:00', value: 1.25 },
-            { timestamp: '12:00', value: airVal },
-            { timestamp: '16:00', value: airVal },
-          ],
+          isSimulated: false,
+          historical: [{ timestamp: 'Actual', value: airVal }],
         },
       ]);
     }
-  }, [visibleDevices, activeTelemetryDeviceId, platformConfig]);
+  }, [visibleDevices, activeTelemetryDeviceId, platformConfig, telemetryHistory]);
 
   // Second counter for last updated
   useEffect(() => {
@@ -551,12 +701,21 @@ export default function App() {
   }, []);
 
   // Handlers
-  const handleRefreshData = useCallback(() => {
+  const handleRefreshData = useCallback(async () => {
     soundAlert.playFeedbackBeep();
+    try {
+      const res = await forceRefreshDevicesFromRTDB(timeoutSecondsRef.current || 20);
+      rawDevicesRef.current = res.raw || {};
+      if (res.devices.length > 0) {
+        setDevices(res.devices);
+      }
+      setIsFirebaseConnected(true);
+    } catch {
+      // Fallback: zero jitter, keep real state and only reset timer indicator
+    }
     setVariables((prev) =>
       prev.map((v) => ({
         ...v,
-        value: Number((v.value + (Math.random() - 0.5) * (v.value * 0.02)).toFixed(1)),
         lastUpdateSeconds: 0,
       }))
     );
@@ -632,15 +791,18 @@ export default function App() {
 
   const handleTriggerForcedVentilation = useCallback((sectorName: string) => {
     soundAlert.playFeedbackBeep();
-    setCurrentSite((prev) => ({
-      ...prev,
-      activeSectors: prev.activeSectors.map((s) =>
+    const updatedSite: MiningSite = {
+      ...currentSite,
+      activeSectors: currentSite.activeSectors.map((s) =>
         s.name.includes(sectorName) || sectorName.includes(s.name)
           ? { ...s, ventilationFanStatus: 'ventilacion_forzada' }
           : s
       ),
-    }));
-  }, []);
+    };
+    setCurrentSite(updatedSite);
+    setSites((prev) => prev.map((site) => (site.id === updatedSite.id ? updatedSite : site)));
+    saveSiteToRTDB(updatedSite).catch(() => {});
+  }, [currentSite]);
 
   const handleSimulateGasSpike = useCallback(async (sensorId: string) => {
     soundAlert.playCriticalAlert();
@@ -939,21 +1101,28 @@ export default function App() {
   }, [isLightActive, activeTelemetryDeviceId]);
 
   const handleAddAssignment = useCallback((newAsg: Omit<WorkerAssignment, 'id'>) => {
+    const fallbackOrg =
+      effectiveOrgId === 'all' ? currentSite.organizationId || DEFAULT_ORGANIZATION.id : effectiveOrgId;
     const created: WorkerAssignment = {
       ...newAsg,
+      organizationId: newAsg.organizationId || fallbackOrg,
       id: `asg-${Date.now()}`,
     };
     setAssignments((prev) => [created, ...prev]);
-  }, []);
+    saveAssignmentToRTDB(created).catch(() => {});
+  }, [effectiveOrgId, currentSite.organizationId]);
 
   const handleAddRentalContract = useCallback((newRent: Omit<DeviceRental, 'id'>) => {
+    const fallbackOrg =
+      effectiveOrgId === 'all' ? currentSite.organizationId || DEFAULT_ORGANIZATION.id : effectiveOrgId;
     const created: DeviceRental = {
       ...newRent,
+      organizationId: newRent.organizationId || fallbackOrg,
       id: `rent-${Date.now()}`,
     };
     setRentals((prev) => [created, ...prev]);
     addRentalContractToRTDB(created);
-  }, []);
+  }, [effectiveOrgId, currentSite.organizationId]);
 
   const handleRecordPayment = useCallback((contractId: string) => {
     soundAlert.playFeedbackBeep();
@@ -969,10 +1138,15 @@ export default function App() {
   }, []);
 
   const handleAddSite = useCallback((newSite: MiningSite) => {
-    setSites((prev) => mergeMiningSites(prev, [newSite]));
-    setCurrentSite(newSite);
-    saveSiteToRTDB(newSite).catch(() => {});
-  }, []);
+    const fallbackOrg = effectiveOrgId === 'all' ? DEFAULT_ORGANIZATION.id : effectiveOrgId;
+    const scopedNewSite: MiningSite = {
+      ...newSite,
+      organizationId: newSite.organizationId || fallbackOrg,
+    };
+    setSites((prev) => mergeMiningSites(prev, [scopedNewSite]));
+    setCurrentSite(scopedNewSite);
+    saveSiteToRTDB(scopedNewSite).catch(() => {});
+  }, [effectiveOrgId]);
 
   const handleUpdateSite = useCallback((updatedSite: MiningSite) => {
     setSites((prev) =>
@@ -1108,18 +1282,42 @@ export default function App() {
     setShowLoginModal(false);
   }, []);
 
-  const activeAlerts = alerts.filter(a => !a.resolved);
+  const scopedSites = useMemo(
+    () => sites.filter((s) => matchesOrg(s.organizationId)),
+    [sites, matchesOrg]
+  );
+  const scopedCurrentSite = useMemo(
+    () => scopedSites.find((s) => s.id === currentSite.id) || scopedSites[0] || currentSite,
+    [scopedSites, currentSite]
+  );
+  const scopedUsers = useMemo(
+    () => usersList.filter((u) => effectiveOrgId === 'all' || u.role === 'superadmin' || matchesOrg(u.organizationId)),
+    [usersList, effectiveOrgId, matchesOrg]
+  );
+  const scopedRentals = useMemo(
+    () => rentals.filter((r) => matchesOrg(r.organizationId)),
+    [rentals, matchesOrg]
+  );
+  const scopedAssignments = useMemo(
+    () => assignments.filter((a) => matchesOrg(a.organizationId)),
+    [assignments, matchesOrg]
+  );
+  const scopedAlerts = useMemo(
+    () => alerts.filter((a) => matchesOrg(a.organizationId)),
+    [alerts, matchesOrg]
+  );
+  const activeAlerts = scopedAlerts.filter(a => !a.resolved);
 
   // Check if gas or dust in the active device is in critical threshold (Prompt Req 4)
-  // An emergency in terrain MUST ONLY trigger if the device is ONLINE (transmitting live within 15 seconds).
-  // If the device is disconnected/unplugged, floating ADC readings of 4095 (pins in the air) do NOT trigger alarms.
+  // An emergency in terrain MUST ONLY trigger if the device is ONLINE and its channels are NOT in sensor fault.
   const activeDevice = visibleDevices.find(d => d.id === activeTelemetryDeviceId) || visibleDevices[0];
   const isDeviceOnline = Boolean(activeDevice?.gatewayOnline);
+  const activeFaults = new Set(activeDevice?.faultFields || []);
   const rawGas = activeDevice?.rawCO !== undefined ? activeDevice.rawCO : activeDevice?.metrics?.co || 0;
   const rawDust = activeDevice?.rawPM25 !== undefined ? activeDevice.rawPM25 : activeDevice?.metrics?.polvoPM || 0;
 
-  const isGasCritical = isDeviceOnline && rawGas >= platformConfig.metrics.emergencyGasThreshold;
-  const isDustCritical = isDeviceOnline && rawDust >= platformConfig.metrics.emergencyDustThreshold;
+  const isGasCritical = isDeviceOnline && !activeFaults.has('CO') && rawGas >= platformConfig.metrics.emergencyGasThreshold;
+  const isDustCritical = isDeviceOnline && !activeFaults.has('PM2_5') && rawDust >= platformConfig.metrics.emergencyDustThreshold;
   const isFieldEmergencyActive = (isGasCritical || isDustCritical || isAlarmActive || isDrillActive) && !dismissEmergencyBanner;
 
   const CONTROLLABLE_ORDER: ControllableTab[] = [
@@ -1216,6 +1414,9 @@ export default function App() {
         platformConfig={platformConfig}
         theme={theme}
         onToggleTheme={handleToggleTheme}
+        organizations={organizations}
+        activeOrganizationId={activeOrganizationId}
+        onSelectOrganization={setActiveOrganizationId}
       />
 
       {/* Feedback de Control de Alarma (Solo SuperAdmin puede apagarla) */}
@@ -1373,8 +1574,9 @@ export default function App() {
             {currentTab === 'dashboard' && (
               <DashboardView
                 variables={variables}
+                telemetryHistory={telemetryHistory}
                 activeAlerts={activeAlerts}
-                currentSite={currentSite}
+                currentSite={scopedCurrentSite}
                 devices={visibleDevices}
                 activeTelemetryDeviceId={activeTelemetryDeviceId}
                 onSelectTelemetryDevice={setActiveTelemetryDeviceId}
@@ -1391,7 +1593,7 @@ export default function App() {
                 isLightActive={isLightActive}
                 onToggleLight={handleToggleLight}
                 currentUser={currentUser}
-                usersList={usersList}
+                usersList={scopedUsers}
                 onChangeUserModal={() => setShowLoginModal(true)}
                 platformConfig={platformConfig}
               />
@@ -1400,7 +1602,7 @@ export default function App() {
             {currentTab === 'monitoreo' && (
               <MonitoringView
                 devices={visibleDevices}
-                currentSite={currentSite}
+                currentSite={scopedCurrentSite}
                 selectedSensorId={selectedSensorId}
                 onSelectSensor={setSelectedSensorId}
                 onSimulateGasSpike={handleSimulateGasSpike}
@@ -1410,7 +1612,7 @@ export default function App() {
 
             {currentTab === 'alertas' && (
               <AlertsView
-                alerts={alerts}
+                alerts={scopedAlerts}
                 devices={visibleDevices}
                 currentUser={currentUser}
                 onAcknowledgeAlert={handleAcknowledgeAlert}
@@ -1434,11 +1636,12 @@ export default function App() {
 
             {currentTab === 'equipos' && (
               <DevicesAndRentalsView
-                rentals={rentals}
-                assignments={assignments}
+                rentals={scopedRentals}
+                assignments={scopedAssignments}
                 devices={visibleDevices}
                 currentUser={currentUser}
                 platformConfig={platformConfig}
+                activeOrganizationId={effectiveOrgId}
                 onAddAssignment={handleAddAssignment}
                 onAddRentalContract={handleAddRentalContract}
                 onRecordPayment={handleRecordPayment}
@@ -1448,15 +1651,19 @@ export default function App() {
             {currentTab === 'reportes' && (
               <HistoricalReportsView
                 variables={variables}
-                currentSite={currentSite}
+                currentSite={scopedCurrentSite}
+                telemetryHistory={telemetryHistory}
+                alertEvents={alertEvents}
+                alerts={scopedAlerts}
               />
             )}
 
             {currentTab === 'faenas' && (
               <MiningSectorsView
-                currentSite={currentSite}
-                allSites={sites}
-                assignments={assignments}
+                currentSite={scopedCurrentSite}
+                allSites={scopedSites}
+                assignments={scopedAssignments}
+                activeOrganizationId={effectiveOrgId}
                 onSelectSite={(siteId) => {
                   const found = sites.find(s => s.id === siteId);
                   if (found) setCurrentSite(found);
@@ -1470,7 +1677,9 @@ export default function App() {
             {currentTab === 'usuarios' && (
               <UsersManagementView
                 currentUser={currentUser}
-                usersList={usersList}
+                usersList={scopedUsers}
+                organizations={organizations}
+                activeOrganizationId={effectiveOrgId}
                 onAddUser={handleAddUser}
                 onUpdateUserRole={handleUpdateUserRole}
                 onToggleUserStatus={handleToggleUserStatus}
@@ -1480,9 +1689,12 @@ export default function App() {
             {currentTab === 'superadmin_panel' && currentUser.role === 'superadmin' && (
               <SuperAdminControlView
                 currentUser={currentUser}
-                usersList={usersList}
+                usersList={scopedUsers}
                 platformConfig={platformConfig}
                 rtdbDevices={devices}
+                organizations={organizations}
+                activeOrganizationId={activeOrganizationId}
+                onSelectOrganization={setActiveOrganizationId}
                 onUpdateUserRole={handleUpdateUserRole}
                 onToggleUserStatus={handleToggleUserStatus}
               />

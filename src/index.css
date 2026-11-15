@@ -555,3 +555,28 @@ html.theme-light svg line[stroke="#1e293b"] {
 html.theme-light svg circle[stroke="#0f172a"] {
   stroke: #ffffff;
 }
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .printable-audit-report,
+  .printable-audit-report * {
+    visibility: visible;
+  }
+  .printable-audit-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    padding: 16px !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+

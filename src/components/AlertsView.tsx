@@ -27,7 +27,9 @@ import {
   FileDown,
   Layers,
   Sparkles,
-  HardHat
+  HardHat,
+  Paperclip,
+  X
 } from 'lucide-react';
 import { 
   SafetyAlert, 
@@ -79,6 +81,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
   const [filterAuditOrigin, setFilterAuditOrigin] = useState<string>('all');
   const [searchAudit, setSearchAudit] = useState('');
   const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
 
   // Combine ESP32 hardware /registro_alarmas with web-documented alert resolutions (/alertas + /bitacora_contingencias)
   const esp32AuditRecords: AlarmAuditRecord[] = extractAlarmAuditRecords(devices);
@@ -216,155 +219,11 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
     showExportToast(`Archivo Excel (.csv) generado con ${rowsToExport.length} registros de auditoría.`);
   };
 
-  // 2. Exportar / Imprimir PDF Oficial
+  // 2. Exportar / Imprimir PDF Oficial (Vista Imprimible In-App para compatibilidad iFrame)
   const handleExportAuditPDF = () => {
     soundAlert.playFeedbackBeep();
-    const rowsToExport = filteredAuditRecords.length > 0 ? filteredAuditRecords : allAuditRecords;
-    
-    // Crear ventana imprimible estilizada con membrete de seguridad minera DS 132
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      showExportToast('Por favor permita ventanas emergentes para generar el reporte PDF.');
-      return;
-    }
-
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html lang="es">
-      <head>
-        <meta charset="UTF-8">
-        <title>Informe Oficial de Auditoría y Registro de Alarmas - MineSafe DS 132</title>
-        <style>
-          body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #1e293b; margin: 25px; font-size: 11px; }
-          .header { border-bottom: 2px solid #0284c7; padding-bottom: 12px; margin-bottom: 18px; }
-          .title { font-size: 18px; font-weight: bold; color: #0f172a; margin: 0; text-transform: uppercase; }
-          .subtitle { font-size: 11px; color: #64748b; margin-top: 4px; }
-          .meta-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0; }
-          .meta-item strong { display: block; font-size: 9px; color: #64748b; text-transform: uppercase; }
-          .meta-item span { font-size: 13px; font-weight: bold; color: #0f172a; }
-          table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 10px; }
-          th { background: #0f172a; color: #ffffff; padding: 7px 6px; text-align: left; font-weight: 600; font-size: 9px; text-transform: uppercase; }
-          td { padding: 6px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
-          tr:nth-child(even) { background-color: #f8fafc; }
-          .badge { display: inline-block; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 8px; }
-          .badge-danger { background: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
-          .badge-manual { background: #ffedd5; color: #9a3412; border: 1px solid #fb923c; }
-          .badge-normal { background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; }
-          .signatures { margin-top: 45px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 30px; text-align: center; }
-          .sig-line { border-top: 1px solid #94a3b8; padding-top: 6px; font-size: 9px; color: #475569; }
-          @media print {
-            body { margin: 10mm; }
-            button { display: none; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div>
-              <h1 class="title">MINESAFE IOT • AUDITORÍA OFICIAL DE ALARMAS</h1>
-              <div class="subtitle">Certificado de Cumplimiento Normativo Sernageomin DS 132 — Seguridad Minera</div>
-            </div>
-            <div style="text-align: right; font-size: 10px; color: #64748b;">
-              Fecha Emisión: ${new Date().toLocaleDateString('es-CL')} ${new Date().toLocaleTimeString('es-CL')}<br>
-              Auditor: ${currentUser?.name || 'Administrador de Faena'} (${currentUser?.roleLabel || 'Seguridad Minera'})
-            </div>
-          </div>
-        </div>
-
-        <div class="meta-grid">
-          <div class="meta-item">
-            <strong>Total de Disparos</strong>
-            <span>${rowsToExport.length}</span>
-          </div>
-          <div class="meta-item">
-            <strong>Causa Natural (Sensores)</strong>
-            <span>${rowsToExport.filter(r => r.origen.includes('NATURAL')).length}</span>
-          </div>
-          <div class="meta-item">
-            <strong>Activación Manual / Pánico</strong>
-            <span>${rowsToExport.filter(r => r.origen.includes('MANUAL')).length}</span>
-          </div>
-          <div class="meta-item">
-            <strong>Nodos Transmisores</strong>
-            <span>${Array.from(new Set(rowsToExport.map(r => r.deviceId))).length}</span>
-          </div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 14%;">Fecha / Hora</th>
-              <th style="width: 18%;">Dispositivo</th>
-              <th style="width: 16%;">Origen de Disparo</th>
-              <th style="width: 18%;">Parámetros Registrados</th>
-              <th style="width: 34%;">Descripción Técnica Emitida</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsToExport.map(r => `
-              <tr>
-                <td><strong>${r.fecha}</strong><br><span style="color:#64748b;">${r.hora}</span></td>
-                <td><strong>${r.deviceName}</strong><br><span style="font-family:monospace; font-size:8px; color:#64748b;">${r.deviceId}</span></td>
-                <td>
-                  <span class="badge ${r.origen.includes('NATURAL') ? 'badge-danger' : 'badge-manual'}">
-                    ${r.origen}
-                  </span>
-                  <div style="font-size:8px; color:#64748b; margin-top:2px;">Vía: ${r.via || 'WIFI_DIRECTO'}</div>
-                </td>
-                <td>
-                  ${r.sourceKind === 'bitacora_web'
-                    ? `<strong>Parámetro:</strong> ${r.metricSummary || '-'}`
-                    : `<strong>CO:</strong> ${r.co} ADC<br><strong>PM2.5:</strong> ${r.pm25} µg/m³<br><strong>Clima:</strong> ${r.temperatura}°C | ${r.humedad}%`
-                  }
-                </td>
-                <td style="line-height: 1.35; color:#334155;">
-                  ${r.alertTitle ? `<strong>${r.alertTitle}</strong><br>` : ''}
-                  ${r.descripcion}
-                  ${r.correctiveActions ? `<br><span style="color:#475569;"><strong>Medidas:</strong> ${r.correctiveActions}</span>` : ''}
-                  ${r.resolvedBy ? `<br><span style="color:#0369a1;"><strong>Responsable:</strong> ${r.resolvedBy}</span>` : ''}
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-
-        <div class="signatures">
-          <div>
-            <div class="sig-line">
-              <strong>${currentUser?.name || 'Manuel Crisostomo'}</strong><br>
-              Prevencionista de Riesgos / SuperAdmin DS 132
-            </div>
-          </div>
-          <div>
-            <div class="sig-line">
-              <strong>Jefe de Turno de Mina</strong><br>
-              Supervisión de Operaciones y Rescate
-            </div>
-          </div>
-          <div>
-            <div class="sig-line">
-              <strong>Auditor Técnico MineSafe IoT</strong><br>
-              Validación Criptográfica y Firma Electrónica
-            </div>
-          </div>
-        </div>
-
-        <script>
-          window.onload = function() {
-            setTimeout(function() {
-              window.print();
-            }, 300);
-          };
-        </script>
-      </body>
-      </html>
-    `;
-
-    printWindow.document.open();
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-    showExportToast('Reporte PDF preparado. Se ha abierto el cuadro de impresión.');
+    setShowPrintPreview(true);
+    showExportToast('Vista de impresión preparada. Presiona "Imprimir / Guardar PDF" dentro del reporte.');
   };
 
   const getSeverityBadge = (severity: AlertSeverity) => {
@@ -381,6 +240,13 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-300 bg-amber-950/80 px-2.5 py-1 rounded border border-amber-800">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
             ADVERTENCIA
+          </span>
+        );
+      case 'preventivo':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 bg-cyan-950/80 px-2.5 py-1 rounded border border-cyan-800">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+            PREVENTIVO
           </span>
         );
       case 'desconectado':
@@ -557,6 +423,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                 <option value="all">Todas las severidades</option>
                 <option value="critico">Solo Críticas</option>
                 <option value="advertencia">Solo Advertencias</option>
+                <option value="preventivo">Solo Preventivas</option>
                 <option value="desconectado">Desconectadas</option>
               </select>
 
@@ -608,6 +475,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                         {alert.acknowledged && !alert.resolved && (
                           <span className="text-[10px] font-semibold text-cyan-300 bg-cyan-950/70 px-2 py-0.5 rounded border border-cyan-800/70">
                             Reconocida{alert.acknowledgedBy ? `: ${alert.acknowledgedBy}` : ''}
+                            {alert.acknowledgedAt ? ` (${new Date(alert.acknowledgedAt).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })})` : ''}
                           </span>
                         )}
                         {alert.resolved && (
@@ -637,7 +505,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-300">
                               <FileText className="w-3.5 h-3.5 text-emerald-400" />
-                              Descripción Guardada en Bitácora
+                              {alert.resolutionDetails.closingTitle || 'Descripción Guardada en Bitácora'}
                             </span>
                             {resBadge && (
                               <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${resBadge.cls}`}>
@@ -655,6 +523,22 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                               <strong className="text-slate-300">Medidas adoptadas:</strong>{' '}
                               {alert.resolutionDetails.correctiveActions}
                             </p>
+                          )}
+                          {alert.resolutionDetails.attachments && alert.resolutionDetails.attachments.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              {alert.resolutionDetails.attachments.map((att) => (
+                                <a
+                                  key={att.id}
+                                  href={att.downloadUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 border border-cyan-800/60 text-cyan-300 hover:underline text-[10px]"
+                                >
+                                  <Paperclip className="w-3 h-3" />
+                                  <span>{att.fileName}</span>
+                                </a>
+                              ))}
+                            </div>
                           )}
                           <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-400 pt-0.5">
                             <span>
@@ -882,9 +766,9 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                           </td>
 
                           <td className="py-3 px-4">
-                            {rec.alertTitle && (
+                            {(rec.closingTitle || rec.alertTitle) && (
                               <span className="text-[11px] font-bold text-white block mb-0.5">
-                                {rec.alertTitle}
+                                {rec.closingTitle ? `${rec.closingTitle}${rec.alertTitle ? ` — ${rec.alertTitle}` : ''}` : rec.alertTitle}
                               </span>
                             )}
                             <p className="text-slate-300 text-[11px] leading-relaxed max-w-md">
@@ -894,6 +778,22 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                               <p className="text-[10px] text-slate-400 mt-1 max-w-md">
                                 <strong className="text-slate-300">Medidas:</strong> {rec.correctiveActions}
                               </p>
+                            )}
+                            {rec.attachments && rec.attachments.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                {rec.attachments.map((att) => (
+                                  <a
+                                    key={att.id}
+                                    href={att.downloadUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-900 border border-cyan-800/60 text-cyan-300 hover:underline text-[10px]"
+                                  >
+                                    <Paperclip className="w-2.5 h-2.5" />
+                                    <span>{att.fileName}</span>
+                                  </a>
+                                ))}
+                              </div>
                             )}
                             {rec.resolvedBy && (
                               <span className="text-[10px] text-cyan-300 block mt-0.5">
@@ -940,6 +840,124 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
           }}
         />
       )}
+
+      {/* Modal Imprimible In-App PDF (sin window.open) */}
+      {showPrintPreview && (() => {
+        const rowsToExport = filteredAuditRecords.length > 0 ? filteredAuditRecords : allAuditRecords;
+        return (
+          <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md p-3 sm:p-6 flex items-start justify-center">
+            <div className="printable-audit-report bg-white text-slate-900 rounded-2xl max-w-4xl w-full p-6 sm:p-8 shadow-2xl space-y-5 my-4">
+              <div className="no-print flex items-center justify-between gap-2 pb-4 border-b border-slate-200">
+                <span className="text-xs font-semibold text-slate-600">
+                  Vista Previa de Auditoría Oficial DS 132 ({rowsToExport.length} registros)
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    Imprimir / Guardar PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowPrintPreview(false)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-semibold cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+
+              <div className="border-b-2 border-sky-600 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-lg font-extrabold text-slate-900 uppercase">
+                    MINESAFE IOT • AUDITORÍA OFICIAL DE ALARMAS
+                  </h2>
+                  <p className="text-xs text-slate-600">
+                    Cumplimiento Normativo Sernageomin DS 132 — Seguridad Minera
+                  </p>
+                </div>
+                <div className="text-right text-[11px] text-slate-600">
+                  <div>Fecha Emisión: {new Date().toLocaleDateString('es-CL')} {new Date().toLocaleTimeString('es-CL')}</div>
+                  <div>Auditor: {currentUser?.name || 'Administrador de Faena'}</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
+                <div>
+                  <span className="text-[10px] uppercase text-slate-500 block">Total Registros</span>
+                  <strong className="text-sm text-slate-900">{rowsToExport.length}</strong>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase text-slate-500 block">Causa Natural</span>
+                  <strong className="text-sm text-slate-900">{rowsToExport.filter(r => r.origen.includes('NATURAL') || r.origen.includes('EMERGENCIA')).length}</strong>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase text-slate-500 block">Manual / Simulacro</span>
+                  <strong className="text-sm text-slate-900">{rowsToExport.filter(r => r.origen.includes('MANUAL') || r.origen.includes('SIMULACRO')).length}</strong>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase text-slate-500 block">Nodos Únicos</span>
+                  <strong className="text-sm text-slate-900">{new Set(rowsToExport.map(r => r.deviceId)).size}</strong>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-[11px]">
+                  <thead>
+                    <tr className="bg-slate-900 text-white text-[10px] uppercase">
+                      <th className="p-2">Fecha / Hora</th>
+                      <th className="p-2">Dispositivo</th>
+                      <th className="p-2">Origen</th>
+                      <th className="p-2">Mediciones</th>
+                      <th className="p-2">Descripción Técnica</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {rowsToExport.map((r, idx) => (
+                      <tr key={`print-${r.id}-${idx}`} className="even:bg-slate-50 align-top">
+                        <td className="p-2 whitespace-nowrap">
+                          <strong>{r.fecha}</strong>
+                          <div className="text-[10px] text-slate-500">{r.hora}</div>
+                        </td>
+                        <td className="p-2">
+                          <strong>{r.deviceName}</strong>
+                          <div className="text-[9px] font-mono text-slate-500">{r.deviceId}</div>
+                        </td>
+                        <td className="p-2 font-mono text-[10px]">{r.origen}</td>
+                        <td className="p-2 font-mono text-[10px]">
+                          {r.sourceKind === 'bitacora_web'
+                            ? r.metricSummary || '-'
+                            : `CO: ${r.co} ADC | PM2.5: ${r.pm25} ADC | ${r.temperatura}°C | ${r.humedad}%`}
+                        </td>
+                        <td className="p-2 text-slate-700">
+                          {(r.closingTitle || r.alertTitle) && (
+                            <strong className="block text-slate-900">{r.closingTitle || r.alertTitle}</strong>
+                          )}
+                          <span>{r.descripcion}</span>
+                          {r.correctiveActions && (
+                            <div className="text-[10px] text-slate-600 mt-0.5">
+                              <strong>Medidas:</strong> {r.correctiveActions}
+                            </div>
+                          )}
+                          {r.resolvedBy && (
+                            <div className="text-[10px] text-sky-700">
+                              <strong>Responsable:</strong> {r.resolvedBy}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

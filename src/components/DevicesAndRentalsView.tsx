@@ -29,7 +29,7 @@ import {
   EquiposSubTab
 } from '../types';
 import { soundAlert } from '../services/audioAlert';
-import { isEquiposSubTabVisibleForUser } from '../services/firebase';
+import { DEFAULT_ORGANIZATION, isEquiposSubTabVisibleForUser } from '../services/firebase';
 
 interface DevicesAndRentalsViewProps {
   rentals: DeviceRental[];
@@ -37,6 +37,7 @@ interface DevicesAndRentalsViewProps {
   devices: SensorDevice[];
   currentUser?: UserProfile | null;
   platformConfig?: PlatformConfig;
+  activeOrganizationId?: string;
   onAddAssignment: (assignment: Omit<WorkerAssignment, 'id'>) => void;
   onAddRentalContract: (contract: Omit<DeviceRental, 'id'>) => void;
   onRecordPayment: (contractId: string) => void;
@@ -50,6 +51,7 @@ export const DevicesAndRentalsView: React.FC<DevicesAndRentalsViewProps> = ({
   devices,
   currentUser = null,
   platformConfig,
+  activeOrganizationId,
   onAddAssignment,
   onAddRentalContract,
   onRecordPayment,
@@ -91,6 +93,11 @@ export const DevicesAndRentalsView: React.FC<DevicesAndRentalsViewProps> = ({
   const [newCostClp, setNewCostClp] = useState(195000);
   const [newEndDate, setNewEndDate] = useState('2026-12-31');
 
+  const effectiveOrgId =
+    activeOrganizationId && activeOrganizationId !== 'all'
+      ? activeOrganizationId
+      : DEFAULT_ORGANIZATION.id;
+
   const handleCreateAssignment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newWorkerName || !newWorkerRut) return;
@@ -98,6 +105,7 @@ export const DevicesAndRentalsView: React.FC<DevicesAndRentalsViewProps> = ({
     const selectedDev = devices.find(d => d.code === newSelectedDeviceCode) || devices[0];
 
     onAddAssignment({
+      organizationId: effectiveOrgId,
       workerName: newWorkerName,
       workerRut: newWorkerRut,
       role: newRole,
@@ -121,6 +129,7 @@ export const DevicesAndRentalsView: React.FC<DevicesAndRentalsViewProps> = ({
     if (!newContractNumber || !newDeviceCode) return;
 
     onAddRentalContract({
+      organizationId: effectiveOrgId,
       contractNumber: newContractNumber,
       deviceCode: newDeviceCode,
       deviceType: newDeviceType,

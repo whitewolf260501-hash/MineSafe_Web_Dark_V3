@@ -150,6 +150,96 @@ const resMulti = alertEngine.processDeviceTelemetry(multiDev);
 assert(resMulti.highestSeverity === 'critico', '8. Evaluación multivariable detecta la severidad mayor (crítico)');
 assert(resMulti.newEvents.length === 2, '8.1 Se emiten eventos independientes por cada variable superada');
 
+// Test 9: syncExistingActiveAlerts preserva severidad preventivo y evita duplicados tras recarga
+alertEngine.clearActiveIncidents();
+const savedIds: string[] = [];
+const updatedEvents: Array<{ id: string; estado?: string }> = [];
+const closedAlerts: Array<{ id: string; clearEmergencyIfNone?: boolean }> = [];
+const playedSounds: Array<'advertencia' | 'critico'> = [];
+
+alertEngine.setPersistenceHandlers({
+  saveEvent: async (ev) => {
+    savedIds.push(ev.id);
+  },
+  updateEvent: async (id, upd) => {
+    updatedEvents.push({ id, estado: upd.estado });
+  },
+  closeAlert: async (id, _reason, opts) => {
+    closedAlerts.push({ id, clearEmergencyIfNone: opts?.clearEmergencyIfNone });
+  },
+  playSound: (lvl) => {
+    playedSounds.push(lvl);
+  },
+});
+
+alertEngine.syncExistingActiveAlerts([
+  {
+    id: 'evt_device_TEST_01_temperatura_1700000000000',
+    code: 'EVT-TEMP-000',
+    title: 'Umbral Preventivo Temperatura',
+    severity: 'preventivo',
+    variableName: 'Temperatura DHT',
+    sensorId: 'device_TEST_01',
+    sensorCode: 'device_TEST_01',
+    sectorName: 'Socavón Norte',
+    recordedValue: '28 °C',
+    safeLimit: '< 26 °C',
+    timestamp: 'Reciente',
+    acknowledged: false,
+    resolved: false,
+    suggestedAction: 'Revisar ventilación.',
+  },
+]);
+const syncedSnapshot = alertEngine.getActiveIncidentsSnapshot();
+assert(
+  syncedSnapshot.length === 1 && syncedSnapshot[0].severity === 'preventivo',
+  '9. syncExistingActiveAlerts conserva severidad preventivo en incidentes evt_*'
+);
+const repeatAfterSync = alertEngine.processDeviceTelemetry(createMockDevice({ rawTemp: 29 }));
+assert(
+  repeatAfterSync.newEvents.length === 0 && savedIds.length === 0,
+  '9.1 Anti-duplicación activa tras recargar página con incidente preventivo en curso'
+);
+
+// Test 10: Escalamiento cierra incidente previo (clearEmergencyIfNone: false) y dispara sonido
+const escalRes = alertEngine.processDeviceTelemetry(createMockDevice({ rawTemp: 34 }));
+assert(escalRes.newEvents.length === 1 && escalRes.newEvents[0].nivel === 'advertencia', '10. Escalamiento a advertencia genera nuevo evento');
+assert(
+  updatedEvents.some((u) => u.id === 'evt_device_TEST_01_temperatura_1700000000000' && u.estado === 'recuperada'),
+  '10.1 Escalamiento marca como recuperado el evento preventivo previo'
+);
+assert(
+  closedAlerts.some((c) => c.id === 'evt_device_TEST_01_temperatura_1700000000000' && c.clearEmergencyIfNone === false),
+  '10.2 Escalamiento cierra alerta previa en RTDB sin limpiar bandera global de emergencia'
+);
+assert(playedSounds.includes('advertencia'), '10.3 Escalamiento a advertencia dispara alerta sonora');
+
+// Test 11: Recuperación a nivel normal limpia emergencia cuando no quedan críticos
+const recSpyRes = alertEngine.processDeviceTelemetry(createMockDevice({ rawTemp: 22 }));
+assert(recSpyRes.recoveredEvents.length === 1, '11. Recuperación emite evento recuperado');
+assert(
+  closedAlerts.some((c) => c.id === escalRes.newEvents[0].id && c.clearEmergencyIfNone === true),
+  '11.1 Al volver a normal sin otros incidentes críticos se envía clearEmergencyIfNone: true'
+);
+
+// Test 12: Canales en falla (faultFields) son ignorados aunque reporten valores altos o NaN
+alertEngine.clearActiveIncidents();
+const faultDev = createMockDevice({
+  rawCO: 4095,
+  rawPM25: 4095,
+  rawTemp: 23,
+  rawHum: 50,
+  faultFields: ['CO', 'PM2_5'],
+  sensorFault: true,
+});
+const resFault = alertEngine.processDeviceTelemetry(faultDev);
+assert(
+  resFault.highestSeverity === 'normal' && resFault.newEvents.length === 0,
+  '12. Canales declarados en faultFields (4095/ADC desconectado) no disparan falsas alarmas'
+);
+
+alertEngine.resetPersistenceHandlers();
+
 console.log(`\nRESUMEN DE PRUEBAS: ${passedTests}/${totalTests} superadas exitosamente.`);
 if (passedTests === totalTests) {
   process.exit(0);

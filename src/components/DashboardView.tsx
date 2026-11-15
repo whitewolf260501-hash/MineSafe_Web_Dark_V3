@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { 
   TelemetryVariable, 
+  TelemetryHistoryPoint,
   SafetyAlert, 
   MiningSite, 
   NavigationTab, 
@@ -42,6 +43,7 @@ import { isTabVisibleForUser } from '../services/firebase';
 
 interface DashboardViewProps {
   variables: TelemetryVariable[];
+  telemetryHistory?: TelemetryHistoryPoint[];
   activeAlerts: SafetyAlert[];
   currentSite: MiningSite;
   devices: SensorDevice[];
@@ -64,6 +66,7 @@ interface DashboardViewProps {
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   variables,
+  telemetryHistory = [],
   activeAlerts,
   currentSite,
   devices,
@@ -156,6 +159,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const totalWorkers = currentSite.activeSectors.reduce((acc, s) => acc + s.activeWorkers, 0);
   const onlineDevicesCount = devices.filter(d => d.status !== 'desconectado').length;
+  const maxSiteDepth =
+    currentSite.activeSectors.length > 0
+      ? Math.max(...currentSite.activeSectors.map((s) => Number(s.depthMeters) || 0))
+      : 0;
 
   return (
     <div className="space-y-10 pb-16">
@@ -192,7 +199,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div>
             <span className="block text-slate-400">Profundidad Máxima:</span>
-            <span className="text-sm font-semibold text-white tabular-nums">Nivel -510 metros</span>
+            <span className="text-sm font-semibold text-white tabular-nums">
+              {maxSiteDepth > 0 ? `Nivel -${maxSiteDepth} metros` : 'Superficie / Rajo'}
+            </span>
           </div>
           <div>
             <span className="block text-slate-400">Alertas Activas:</span>
@@ -218,6 +227,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onChangeUserModal={onChangeUserModal}
               activeAlertCount={activeAlerts.length}
               platformConfig={platformConfig}
+              telemetryHistory={telemetryHistory}
+              siteName={currentSite.name}
             />
           </div>
         )}
@@ -238,6 +249,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             onToggleLight={onToggleLight}
             isSuperAdmin={currentUser?.role === 'superadmin'}
             currentUser={currentUser}
+            timeoutSeconds={metCfg?.gatewayTimeoutSeconds}
           />
         )}
 
@@ -558,7 +570,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </p>
           </div>
 
-          {/* Card 3: Análisis Predictivo */}
+          {/* Card 3: Historial y Tendencias */}
           <div 
             onClick={() => canSeeReportes && safeNavigate('reportes')}
             className={`group p-4 rounded-xl bg-slate-900/60 border border-blue-900/30 hover:border-blue-500/50 hover:bg-slate-900/90 transition-all duration-200 shadow-sm ${canSeeReportes ? 'cursor-pointer' : 'opacity-75'}`}
@@ -568,11 +580,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <BarChart3 className="w-5 h-5" />
               </div>
               <h3 className="text-sm font-bold text-white group-hover:text-blue-300 transition-colors">
-                ANÁLISIS PREDICTIVO
+                HISTORIAL Y REPORTES
               </h3>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Modelado de tendencias de acumulación de monóxido y calor para anticipar riesgos en galerías.
+              Registro histórico real de sensores en RTDB, resúmenes estadísticos y exportación normativa DS 132.
             </p>
           </div>
 
@@ -764,7 +776,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* ==============================================================
           ADDITIONAL GASES & CRITICAL METRICS ROW
          ============================================================== */}
-      {(appCfg?.showAdditionalGasesRow ?? true) && (
+      {(appCfg?.showAdditionalGasesRow ?? true) && (() => {
+        const faults = new Set(activeDevice?.faultFields || []);
+        const coFault = faults.has('CO');
+        const pmFault = faults.has('PM2_5');
+        const hasRawCO = activeDevice?.rawCO !== undefined;
+        const hasRawPM = activeDevice?.rawPM25 !== undefined;
+        return (
       <section className="bg-slate-900/40 border border-slate-800 rounded-xl p-5">
         <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2">
           <Flame className="w-4 h-4 text-orange-400" />
@@ -773,27 +791,36 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="p-3 bg-slate-950/50 rounded-lg border border-slate-800">
             <span className="text-[11px] text-slate-400 block">Metano (CH4)</span>
-            <span className="text-xl font-bold text-white tabular-nums">{activeDevice?.metrics?.ch4 ?? 1.2}% LEL</span>
+            <span className="text-xl font-bold text-white tabular-nums">{activeDevice?.metrics?.ch4 ?? 0}% LEL</span>
             <span className="text-[10px] text-emerald-400 block mt-0.5">Seguro (&lt; {metCfg?.ch4SafeMax ?? 1.5}%)</span>
           </div>
           <div className="p-3 bg-slate-950/50 rounded-lg border border-slate-800">
-            <span className="text-[11px] text-slate-400 block">Monóxido (CO)</span>
-            <span className="text-xl font-bold text-white tabular-nums">{activeDevice?.rawCO ?? activeDevice?.metrics?.co ?? 9.4} ppm</span>
-            <span className="text-[10px] text-emerald-400 block mt-0.5">Límite (&lt; {metCfg?.coChartSafeMax ?? 50} ppm)</span>
+            <span className="text-[11px] text-slate-400 block">{hasRawCO ? 'Gas MQ-2 (ADC raw)' : 'Monóxido (CO)'}</span>
+            <span className={`text-xl font-bold tabular-nums ${coFault ? 'text-amber-400' : 'text-white'}`}>
+              {coFault ? 'FALLA' : `${activeDevice?.rawCO ?? activeDevice?.metrics?.co ?? 0} ${hasRawCO ? 'ADC' : 'ppm'}`}
+            </span>
+            <span className="text-[10px] text-emerald-400 block mt-0.5">
+              {coFault ? 'Sensor desconectado/NaN' : hasRawCO ? `Prev (< ${metCfg?.coPreventivo ?? 300} ADC)` : `Límite (< ${metCfg?.coChartSafeMax ?? 50} ppm)`}
+            </span>
           </div>
           <div className="p-3 bg-slate-950/50 rounded-lg border border-slate-800">
-            <span className="text-[11px] text-slate-400 block">Polvo (PM2.5)</span>
-            <span className="text-xl font-bold text-white tabular-nums">{activeDevice?.rawPM25 ?? activeDevice?.metrics?.polvoPM ?? 24} µg/m³</span>
-            <span className="text-[10px] text-emerald-400 block mt-0.5">Límite (&lt; {metCfg?.pm25ChartSafeMax ?? 50} µg/m³)</span>
+            <span className="text-[11px] text-slate-400 block">{hasRawPM ? 'Polvo PM2.5 (ADC raw)' : 'Polvo (PM2.5)'}</span>
+            <span className={`text-xl font-bold tabular-nums ${pmFault ? 'text-amber-400' : 'text-white'}`}>
+              {pmFault ? 'FALLA' : `${activeDevice?.rawPM25 ?? activeDevice?.metrics?.polvoPM ?? 0} ${hasRawPM ? 'ADC' : 'µg/m³'}`}
+            </span>
+            <span className="text-[10px] text-emerald-400 block mt-0.5">
+              {pmFault ? 'Sensor desconectado/NaN' : hasRawPM ? `Prev (< ${metCfg?.pm25Preventivo ?? 350} ADC)` : `Límite (< ${metCfg?.pm25ChartSafeMax ?? 50} µg/m³)`}
+            </span>
           </div>
           <div className="p-3 bg-slate-950/50 rounded-lg border border-slate-800">
             <span className="text-[11px] text-slate-400 block">Presión Acústica</span>
-            <span className="text-xl font-bold text-white tabular-nums">{activeDevice?.metrics?.ruido ?? 72} dB</span>
+            <span className="text-xl font-bold text-white tabular-nums">{activeDevice?.metrics?.ruido ?? 0} dB</span>
             <span className="text-[10px] text-emerald-400 block mt-0.5">Límite (&lt; {metCfg?.noiseSafeMax ?? 82} dB)</span>
           </div>
         </div>
       </section>
-      )}
+        );
+      })()}
 
     </div>
   );

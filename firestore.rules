@@ -1,34 +1,381 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // User accounts
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Primitive Helpers ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isPrimaryAdminEmail() {
+      return isVerifiedUser() && request.auth.token.email == 'manuelcrisostomovega@gmail.com';
+    }
+
+    function isAdmin() {
+      return isPrimaryAdminEmail() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isOwner(ownerId) {
+      return isVerifiedUser() && request.auth.uid == ownerId;
+    }
+
+    // --- Validation Blueprints ---
+    function isValidAdmin(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+        data.role in ['superadmin', 'admin'] &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidOrganization(data) {
+      return data.keys().hasAll(['id', 'name', 'ownerId', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'rut', 'industry', 'ownerId', 'status', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 160 &&
+        (!('rut' in data) || (data.rut is string && data.rut.size() <= 32)) &&
+        (!('industry' in data) || (data.industry is string && data.industry.size() <= 100)) &&
+        isValidId(data.ownerId) &&
+        data.status in ['activa', 'suspendida'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'name', 'email', 'role', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'name', 'email', 'role', 'roleLabel', 'organizationId',
+          'rut', 'shift', 'status', 'lastLogin', 'assignedSector',
+          'assignedDeviceCode', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+        data.role in ['superadmin', 'admin', 'operador'] &&
+        (!('roleLabel' in data) || (data.roleLabel is string && data.roleLabel.size() <= 80)) &&
+        (!('organizationId' in data) || isValidId(data.organizationId)) &&
+        (!('rut' in data) || (data.rut is string && data.rut.size() <= 32)) &&
+        (!('shift' in data) || (data.shift is string && data.shift.size() <= 80)) &&
+        data.status in ['activo', 'inactivo'] &&
+        (!('lastLogin' in data) || (data.lastLogin is string && data.lastLogin.size() <= 64)) &&
+        (!('assignedSector' in data) || (data.assignedSector is string && data.assignedSector.size() <= 120)) &&
+        (!('assignedDeviceCode' in data) || (data.assignedDeviceCode is string && data.assignedDeviceCode.size() <= 64)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDevice(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'organizationId', 'code', 'name', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'organizationId', 'code', 'name', 'type', 'sectorId',
+          'sectorName', 'batteryPct', 'signalStrength', 'lastPing', 'status',
+          'assignedTo', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.organizationId) &&
+        data.code is string && data.code.size() >= 1 && data.code.size() <= 64 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        (!('type' in data) || (data.type is string && data.type.size() <= 64)) &&
+        (!('sectorId' in data) || (data.sectorId is string && data.sectorId.size() <= 128)) &&
+        (!('sectorName' in data) || (data.sectorName is string && data.sectorName.size() <= 120)) &&
+        (!('batteryPct' in data) || (data.batteryPct is number && data.batteryPct >= 0 && data.batteryPct <= 100)) &&
+        (!('signalStrength' in data) || (data.signalStrength is string && data.signalStrength.size() <= 32)) &&
+        (!('lastPing' in data) || (data.lastPing is string && data.lastPing.size() <= 64)) &&
+        data.status in ['normal', 'preventivo', 'advertencia', 'critico', 'desconectado'] &&
+        (!('assignedTo' in data) || (data.assignedTo is string && data.assignedTo.size() <= 120)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAlert(data) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'organizationId', 'code', 'title', 'severity',
+          'acknowledged', 'resolved', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'organizationId', 'code', 'title', 'severity',
+          'variableName', 'sensorId', 'sensorCode', 'sectorName',
+          'recordedValue', 'safeLimit', 'acknowledged', 'acknowledgedBy',
+          'resolved', 'status', 'closingTitle', 'suggestedAction',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.organizationId) &&
+        data.code is string && data.code.size() >= 1 && data.code.size() <= 64 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.severity in ['normal', 'preventivo', 'advertencia', 'critico', 'desconectado'] &&
+        (!('variableName' in data) || (data.variableName is string && data.variableName.size() <= 80)) &&
+        (!('sensorId' in data) || (data.sensorId is string && data.sensorId.size() <= 128)) &&
+        (!('sensorCode' in data) || (data.sensorCode is string && data.sensorCode.size() <= 64)) &&
+        (!('sectorName' in data) || (data.sectorName is string && data.sectorName.size() <= 120)) &&
+        (!('recordedValue' in data) || (data.recordedValue is string && data.recordedValue.size() <= 64)) &&
+        (!('safeLimit' in data) || (data.safeLimit is string && data.safeLimit.size() <= 64)) &&
+        data.acknowledged is bool &&
+        (!('acknowledgedBy' in data) || (data.acknowledgedBy is string && data.acknowledgedBy.size() <= 120)) &&
+        data.resolved is bool &&
+        data.status in ['activa', 'resuelta'] &&
+        (!('closingTitle' in data) || (data.closingTitle is string && data.closingTitle.size() <= 180)) &&
+        (!('suggestedAction' in data) || (data.suggestedAction is string && data.suggestedAction.size() <= 500)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidRental(data) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'organizationId', 'contractNumber', 'deviceCode',
+          'provider', 'monthlyCostClp', 'paymentStatus', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'organizationId', 'contractNumber', 'deviceCode',
+          'deviceType', 'provider', 'startDate', 'endDate', 'monthlyCostClp',
+          'paymentStatus', 'assignedTechnician', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.organizationId) &&
+        data.contractNumber is string && data.contractNumber.size() >= 1 && data.contractNumber.size() <= 64 &&
+        data.deviceCode is string && data.deviceCode.size() >= 1 && data.deviceCode.size() <= 64 &&
+        (!('deviceType' in data) || (data.deviceType is string && data.deviceType.size() <= 120)) &&
+        data.provider is string && data.provider.size() >= 1 && data.provider.size() <= 160 &&
+        (!('startDate' in data) || (data.startDate is string && data.startDate.size() <= 32)) &&
+        (!('endDate' in data) || (data.endDate is string && data.endDate.size() <= 32)) &&
+        data.monthlyCostClp is number && data.monthlyCostClp >= 0 && data.monthlyCostClp <= 1000000000 &&
+        data.paymentStatus in ['al_dia', 'proximo_a_vencer', 'pago_pendiente', 'vencido'] &&
+        (!('assignedTechnician' in data) || (data.assignedTechnician is string && data.assignedTechnician.size() <= 120)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 600)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAttachment(data) {
+      return data.keys().hasAll([
+          'id', 'alertId', 'ownerId', 'organizationId', 'fileName',
+          'contentType', 'sizeBytes', 'downloadUrl', 'storagePath', 'uploadedBy', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'alertId', 'ownerId', 'organizationId', 'fileName',
+          'contentType', 'sizeBytes', 'downloadUrl', 'storagePath', 'uploadedBy', 'createdAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.alertId) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.organizationId) &&
+        data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 200 &&
+        data.contentType in ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] &&
+        data.sizeBytes is number && data.sizeBytes > 0 && data.sizeBytes <= 5242880 &&
+        data.downloadUrl is string && data.downloadUrl.size() >= 10 && data.downloadUrl.size() <= 1024 &&
+        data.storagePath is string && data.storagePath.size() >= 1 && data.storagePath.size() <= 512 &&
+        data.uploadedBy is string && data.uploadedBy.size() >= 1 && data.uploadedBy.size() <= 120 &&
+        data.createdAt is timestamp;
+    }
+
+    // --- Admin Registry ---
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && (isOwner(adminId) || isAdmin());
+      allow list: if isPrimaryAdminEmail();
+      allow create: if isValidId(adminId) &&
+        isValidAdmin(incoming()) &&
+        incoming().uid == adminId &&
+        incoming().createdAt == request.time &&
+        isAdmin();
+      allow update, delete: if isValidId(adminId) && isPrimaryAdminEmail();
+    }
+
+    // --- Organizations (Multi-Tenant Root) ---
+    match /organizations/{organizationId} {
+      allow get: if isValidId(organizationId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && (resource.data.ownerId == request.auth.uid || isPrimaryAdminEmail());
+      allow create: if isValidId(organizationId) &&
+        isValidOrganization(incoming()) &&
+        incoming().id == organizationId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isValidId(organizationId) &&
+        isValidOrganization(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        isAdmin() &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'rut', 'industry', 'status', 'updatedAt']);
+      allow delete: if isValidId(organizationId) && isAdmin();
+    }
+
+    // --- User Accounts (Strict PII Isolation) ---
     match /users/{userId} {
-      allow read: if true;
-      allow write: if true;
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.id == request.auth.uid || isPrimaryAdminEmail());
+      allow create: if isValidId(userId) &&
+        isValidUser(incoming()) &&
+        incoming().id == userId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          (isOwner(userId) && incoming().role == 'operador' && incoming().status == 'activo') ||
+          isAdmin()
+        );
+      allow update: if isValidId(userId) &&
+        isValidUser(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isOwner(userId) &&
+            incoming().role == existing().role &&
+            incoming().status == existing().status &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'rut', 'shift', 'lastLogin', 'assignedSector', 'assignedDeviceCode', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(userId) && isAdmin();
     }
 
-    // IoT Sensor devices and live measurements
+    // --- IoT Sensor Devices ---
     match /devices/{deviceId} {
-      allow read: if true;
-      allow write: if true;
+      allow get: if isValidId(deviceId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && (resource.data.ownerId == request.auth.uid || isPrimaryAdminEmail());
+      allow create: if isValidId(deviceId) &&
+        isValidDevice(incoming()) &&
+        incoming().id == deviceId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(deviceId) &&
+        isValidDevice(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isOwner(existing().ownerId) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'batteryPct', 'signalStrength', 'lastPing', 'status', 'assignedTo', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(deviceId) && isAdmin();
     }
 
-    // Safety and contingency alerts
+    // --- Safety Contingency Alerts (Terminal State Locking) ---
     match /alerts/{alertId} {
-      allow read: if true;
-      allow write: if true;
+      allow get: if isValidId(alertId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && (resource.data.ownerId == request.auth.uid || isPrimaryAdminEmail());
+      allow create: if isValidId(alertId) &&
+        isValidAlert(incoming()) &&
+        incoming().id == alertId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().status == 'activa' &&
+        incoming().resolved == false &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(alertId) &&
+        isValidAlert(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            existing().status == 'activa' &&
+            existing().resolved == false &&
+            (
+              // Action 1: Acknowledge alert
+              (
+                incoming().status == 'activa' &&
+                incoming().resolved == false &&
+                incoming().acknowledged == true &&
+                incoming().diff(existing()).affectedKeys().hasOnly(['acknowledged', 'acknowledgedBy', 'updatedAt'])
+              ) ||
+              // Action 2: Resolve alert (Terminal transition)
+              (
+                incoming().status == 'resuelta' &&
+                incoming().resolved == true &&
+                incoming().diff(existing()).affectedKeys().hasOnly([
+                  'acknowledged', 'acknowledgedBy', 'resolved', 'status', 'closingTitle', 'suggestedAction', 'updatedAt'
+                ])
+              )
+            )
+          )
+        );
+      allow delete: if isValidId(alertId) && isAdmin();
     }
 
-    // Equipment rental contracts and payments
+    // --- Equipment Rental Contracts ---
     match /rentals/{rentalId} {
-      allow read: if true;
-      allow write: if true;
+      allow get: if isValidId(rentalId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && (resource.data.ownerId == request.auth.uid || isPrimaryAdminEmail());
+      allow create: if isValidId(rentalId) &&
+        isValidRental(incoming()) &&
+        incoming().id == rentalId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isValidId(rentalId) &&
+        isValidRental(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        isAdmin() &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'endDate', 'monthlyCostClp', 'paymentStatus', 'assignedTechnician', 'notes', 'updatedAt'
+        ]);
+      allow delete: if isValidId(rentalId) && isAdmin();
     }
 
-    // Test connection document
+    // --- Evidence Attachments (Master Gate: Parent Alert Must Exist) ---
+    match /attachments/{attachmentId} {
+      allow get: if isValidId(attachmentId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && (resource.data.ownerId == request.auth.uid || isPrimaryAdminEmail());
+      allow create: if isValidId(attachmentId) &&
+        isValidAttachment(incoming()) &&
+        incoming().id == attachmentId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/alerts/$(incoming().alertId));
+      allow update: if false;
+      allow delete: if isValidId(attachmentId) && (isOwner(existing().ownerId) || isAdmin());
+    }
+
+    // --- Healthcheck Doc ---
     match /test/{docId} {
-      allow read, write: if true;
+      allow get: if isValidId(docId) && isVerifiedUser();
+      allow list, write: if false;
     }
   }
 }

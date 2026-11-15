@@ -27,9 +27,10 @@ import {
   Sliders,
   Lock,
   Sun,
-  Moon
+  Moon,
+  Building2
 } from 'lucide-react';
-import { NavigationTab, PlatformConfig, UserProfile } from '../types';
+import { NavigationTab, Organization, PlatformConfig, UserProfile } from '../types';
 import { soundAlert } from '../services/audioAlert';
 import { isTabVisibleForUser } from '../services/firebase';
 
@@ -54,6 +55,9 @@ interface NavbarProps {
   platformConfig?: PlatformConfig;
   theme?: 'dark' | 'light';
   onToggleTheme?: () => void;
+  organizations?: Organization[];
+  activeOrganizationId?: string;
+  onSelectOrganization?: (orgId: string) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -77,6 +81,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   platformConfig,
   theme = 'dark',
   onToggleTheme,
+  organizations = [],
+  activeOrganizationId = 'all',
+  onSelectOrganization,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(soundAlert.getMutedState());
@@ -326,6 +333,26 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
+            {/* Organization Switcher for SuperAdmin */}
+            {isSuperAdmin && organizations.length > 0 && onSelectOrganization && (
+              <div className="hidden xl:flex items-center gap-1.5 px-2 py-1 rounded-lg border border-slate-800 bg-slate-900/90 text-xs shrink-0">
+                <Building2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <select
+                  value={activeOrganizationId}
+                  onChange={(e) => onSelectOrganization(e.target.value)}
+                  aria-label="Seleccionar Organización"
+                  className="bg-transparent text-slate-200 text-[11px] font-semibold focus:outline-none max-w-[140px]"
+                >
+                  <option value="all" className="bg-slate-950 text-white">Todas las Org.</option>
+                  {organizations.map((org) => (
+                    <option key={org.id} value={org.id} className="bg-slate-950 text-white">
+                      {org.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* Divider */}
             <div className="h-5 w-px bg-slate-800" />
 
@@ -492,6 +519,24 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="pt-3 border-t border-slate-800 flex flex-col gap-2">
+            {isSuperAdmin && organizations.length > 0 && onSelectOrganization && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800/80 border border-slate-700 text-xs">
+                <Building2 className="w-4 h-4 text-cyan-400 shrink-0" />
+                <select
+                  value={activeOrganizationId}
+                  onChange={(e) => onSelectOrganization(e.target.value)}
+                  aria-label="Organización activa"
+                  className="w-full bg-transparent text-slate-200 font-semibold focus:outline-none"
+                >
+                  <option value="all" className="bg-slate-950 text-white">Todas las Organizaciones</option>
+                  {organizations.map((org) => (
+                    <option key={org.id} value={org.id} className="bg-slate-950 text-white">
+                      {org.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <button
                 onClick={() => {

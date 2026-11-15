@@ -17,10 +17,24 @@ interface DualReadingSensorCardsProps {
 }
 
 export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ device }) => {
-  const coVal = typeof device?.rawCO === 'number' ? device.rawCO : device.metrics.co;
-  const pmVal = typeof device?.rawPM25 === 'number' ? device.rawPM25 : device.metrics.polvoPM;
-  const tempVal = typeof device?.rawTemp === 'number' ? device.rawTemp : device.metrics.temperatura;
-  const humVal = typeof device?.rawHum === 'number' ? device.rawHum : device.metrics.humedad;
+  const faultSet = new Set(device?.faultFields || []);
+  const coFault = faultSet.has('CO');
+  const pmFault = faultSet.has('PM2_5');
+  const tempFault = faultSet.has('temperatura');
+  const humFault = faultSet.has('humedad');
+
+  const coVal = !coFault
+    ? (typeof device?.rawCO === 'number' ? device.rawCO : device.metrics.co)
+    : undefined;
+  const pmVal = !pmFault
+    ? (typeof device?.rawPM25 === 'number' ? device.rawPM25 : device.metrics.polvoPM)
+    : undefined;
+  const tempVal = !tempFault
+    ? (typeof device?.rawTemp === 'number' ? device.rawTemp : device.metrics.temperatura)
+    : undefined;
+  const humVal = !humFault
+    ? (typeof device?.rawHum === 'number' ? device.rawHum : device.metrics.humedad)
+    : undefined;
 
   const isOnline = Boolean(device?.gatewayOnline);
 
@@ -28,7 +42,10 @@ export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ 
   let coStatusColor: 'verde' | 'amarillo' | 'rojo' = 'verde';
   let coFriendlyLabel = 'Aire Limpio / Seguro';
 
-  if (!isOnline) {
+  if (coFault || coVal === undefined || !Number.isFinite(coVal)) {
+    coStatusColor = 'amarillo';
+    coFriendlyLabel = 'Falla de Sensor / Sin Lectura Válida';
+  } else if (!isOnline) {
     if (coVal === 4095) {
       coStatusColor = 'amarillo';
       coFriendlyLabel = 'Sensor No Conectado (Pin Flotante 4095 ADC)';
@@ -51,7 +68,10 @@ export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ 
   let pmStatusColor: 'verde' | 'amarillo' | 'rojo' = 'verde';
   let pmFriendlyLabel = 'Baja densidad de partículas';
 
-  if (!isOnline) {
+  if (pmFault || pmVal === undefined || !Number.isFinite(pmVal)) {
+    pmStatusColor = 'amarillo';
+    pmFriendlyLabel = 'Falla de Sensor / Sin Lectura Válida';
+  } else if (!isOnline) {
     if (pmVal === 4095) {
       pmStatusColor = 'amarillo';
       pmFriendlyLabel = 'Sensor No Conectado (Pin Flotante 4095 ADC)';
@@ -74,7 +94,10 @@ export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ 
   let thermalFriendlyLabel = 'Ambiente Agradable';
   let thermalStatusColor: 'verde' | 'amarillo' | 'rojo' = 'verde';
 
-  if (tempVal > 30) {
+  if (tempFault || humFault || tempVal === undefined || humVal === undefined) {
+    thermalFriendlyLabel = 'Falla Lectura DHT11 (null/NaN)';
+    thermalStatusColor = 'amarillo';
+  } else if (tempVal > 30) {
     thermalFriendlyLabel = 'Calor Excesivo';
     thermalStatusColor = 'rojo';
   } else if (tempVal < 10 && tempVal > 0) {
@@ -115,9 +138,8 @@ export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ 
             ? 'bg-gradient-to-br from-emerald-950/40 to-slate-900 border-emerald-500/40 shadow-lg shadow-emerald-950/20'
             : coStatusColor === 'amarillo'
             ? 'bg-gradient-to-br from-amber-950/40 to-slate-900 border-amber-500/50 shadow-lg shadow-amber-950/20'
-            : 'bg-gradient-to-br from-rose-950/70 to-slate-900 border-rose-500/80 shadow-xl shadow-rose-950/40 ring-1 ring-rose-500 animate-pulse'
+            : 'bg-gradient-to-br from-rose-950/70 to-slate-900 border-rose-500/80 shadow-xl shadow-rose-950/40 ring-1 ring-rose-50 animate-pulse'
         }`}>
-          {/* Card Top Pill & Icon */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
@@ -141,7 +163,6 @@ export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ 
             </span>
           </div>
 
-          {/* Lectura Amigable (Gran Jerarquía Visual) */}
           <div className="my-2">
             <div className={`text-lg sm:text-xl font-black tracking-tight leading-snug ${
               coStatusColor === 'verde' ? 'text-emerald-300' :
@@ -152,15 +173,16 @@ export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ 
             </div>
           </div>
 
-          {/* Dato Técnico (Menor Jerarquía Visual) */}
           <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
             <span className="text-[11px]">Dato Técnico:</span>
             <div className="text-right">
               <span className="font-mono font-bold text-white text-sm">
-                Valor ADC: {coVal}
+                {coFault || coVal === undefined ? 'Sin lectura válida (null/NaN)' : `Valor ADC: ${coVal}`}
               </span>
               <span className="text-[10px] text-slate-400 block font-mono">
-                {coVal >= 1000 ? 'Saturación Sensor ADC (PPM > 50)' : `~${Math.round(coVal / 15)} ppm est.`}
+                {coFault || coVal === undefined
+                  ? 'Revisar cableado/ADC de MQ-2'
+                  : 'Señal bruta 12-bit (0–4095) sin curva ppm'}
               </span>
             </div>
           </div>
@@ -176,7 +198,6 @@ export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ 
             ? 'bg-gradient-to-br from-amber-950/40 to-slate-900 border-amber-500/50 shadow-lg shadow-amber-950/20'
             : 'bg-gradient-to-br from-rose-950/70 to-slate-900 border-rose-500/80 shadow-xl shadow-rose-950/40 ring-1 ring-rose-500 animate-pulse'
         }`}>
-          {/* Card Top Pill & Icon */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
@@ -200,7 +221,6 @@ export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ 
             </span>
           </div>
 
-          {/* Lectura Amigable (Gran Jerarquía Visual) */}
           <div className="my-2">
             <div className={`text-lg sm:text-xl font-black tracking-tight leading-snug ${
               pmStatusColor === 'verde' ? 'text-emerald-300' :
@@ -211,15 +231,16 @@ export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ 
             </div>
           </div>
 
-          {/* Dato Técnico (Menor Jerarquía Visual) */}
           <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
             <span className="text-[11px]">Dato Técnico:</span>
             <div className="text-right">
               <span className="font-mono font-bold text-white text-sm">
-                Lectura sensor: {pmVal} µg/m³
+                {pmFault || pmVal === undefined ? 'Sin lectura válida (null/NaN)' : `Lectura ADC 12-bit: ${pmVal}`}
               </span>
               <span className="text-[10px] text-slate-400 block font-mono">
-                Valor ADC: {pmVal}
+                {pmFault || pmVal === undefined
+                  ? 'Revisar sensor óptico de polvo'
+                  : 'Señal óptica bruta (sin conversión µg/m³)'}
               </span>
             </div>
           </div>
@@ -235,7 +256,6 @@ export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ 
             ? 'bg-gradient-to-br from-amber-950/40 to-slate-900 border-amber-500/50 shadow-lg shadow-amber-950/20'
             : 'bg-gradient-to-br from-rose-950/70 to-slate-900 border-rose-500/80 shadow-xl shadow-rose-950/40 ring-1 ring-rose-500'
         }`}>
-          {/* Card Top Pill & Icon */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
@@ -259,7 +279,6 @@ export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ 
             </span>
           </div>
 
-          {/* Lectura Amigable (Gran Jerarquía Visual) */}
           <div className="my-2">
             <div className={`text-lg sm:text-xl font-black tracking-tight leading-snug ${
               thermalStatusColor === 'verde' ? 'text-emerald-300' :
@@ -270,12 +289,11 @@ export const DualReadingSensorCards: React.FC<DualReadingSensorCardsProps> = ({ 
             </div>
           </div>
 
-          {/* Dato Técnico (Menor Jerarquía Visual) */}
           <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
             <span className="text-[11px]">Dato Técnico:</span>
             <div className="text-right">
               <span className="font-mono font-bold text-white text-sm">
-                {tempVal} °C y {humVal} % Humedad
+                {tempFault ? '--' : tempVal} °C y {humFault ? '--' : humVal} % Humedad
               </span>
               <span className="text-[10px] text-slate-400 block font-mono">
                 Sensor Digital DHT11

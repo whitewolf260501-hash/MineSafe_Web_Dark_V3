@@ -33,12 +33,14 @@ import {
   Edit3,
   Wifi,
   WifiOff,
-  Check
+  Check,
+  Building2
 } from 'lucide-react';
 import {
   ControllableTab,
   EquiposSubTab,
   DeviceCategory,
+  Organization,
   PlatformConfig,
   RegisteredDeviceConfig,
   SensorDevice,
@@ -48,10 +50,13 @@ import {
 } from '../types';
 import {
   DEFAULT_PLATFORM_CONFIG,
+  DEFAULT_ORGANIZATION,
   savePlatformConfig,
   resetPlatformConfigToDefault,
   initializeRegisteredDeviceInRTDB,
-  normalizeEmailOverrideKey
+  normalizeEmailOverrideKey,
+  saveOrganizationToRTDB,
+  deleteOrganizationFromRTDB
 } from '../services/firebase';
 import { soundAlert } from '../services/audioAlert';
 
@@ -60,6 +65,9 @@ interface SuperAdminControlViewProps {
   usersList: UserProfile[];
   platformConfig: PlatformConfig;
   rtdbDevices?: SensorDevice[];
+  organizations?: Organization[];
+  activeOrganizationId?: string;
+  onSelectOrganization?: (orgId: string) => void;
   onUpdateUserRole?: (userId: string, newRole: UserRole) => void;
   onToggleUserStatus?: (userId: string) => void;
 }
@@ -97,7 +105,7 @@ const CONTROLLABLE_WINDOWS: Array<{
   {
     id: 'reportes',
     label: 'Historial y Reportes',
-    description: 'Series históricas y exportación normativa DS 132',
+    description: 'Series históricas reales y exportación normativa DS 132',
   },
   {
     id: 'faenas',
@@ -143,10 +151,13 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
   usersList,
   platformConfig,
   rtdbDevices = [],
+  organizations = [DEFAULT_ORGANIZATION],
+  activeOrganizationId = 'all',
+  onSelectOrganization,
   onUpdateUserRole,
   onToggleUserStatus,
 }) => {
-  const [subTab, setSubTab] = useState<'windows' | 'metrics' | 'page' | 'devices'>('windows');
+  const [subTab, setSubTab] = useState<'windows' | 'metrics' | 'page' | 'devices' | 'organizations'>('windows');
   const [draftConfig, setDraftConfig] = useState<PlatformConfig>(platformConfig);
   const draftConfigRef = useRef<PlatformConfig>(platformConfig);
   const activeSaveCountRef = useRef<number>(0);
@@ -165,10 +176,20 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
   const [newDevName, setNewDevName] = useState('');
   const [newDevCategory, setNewDevCategory] = useState<DeviceCategory>('sensor');
   const [newDevSector, setNewDevSector] = useState('Mina Chuquicamata - Rampa Principal');
+  const [newDevOrganizationId, setNewDevOrganizationId] = useState(
+    activeOrganizationId && activeOrganizationId !== 'all' ? activeOrganizationId : DEFAULT_ORGANIZATION.id
+  );
   const [newDevParentGateway, setNewDevParentGateway] = useState('device_38A839E81F84');
   const [newDevLocalIp, setNewDevLocalIp] = useState('192.168.4.1');
   const [initNodeInRTDB, setInitNodeInRTDB] = useState(true);
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
+
+  // Estado del formulario multi-empresa (Organizaciones)
+  const [orgName, setOrgName] = useState('');
+  const [orgRut, setOrgRut] = useState('');
+  const [orgIndustry, setOrgIndustry] = useState('Minería Subterránea & Rajo');
+  const [orgStatus, setOrgStatus] = useState<'activa' | 'suspendida'>('activa');
+  const [editingOrgId, setEditingOrgId] = useState<string | null>(null);
 
   useEffect(() => {
     if (activeSaveCountRef.current > 0) return;
@@ -513,6 +534,7 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
 
     const deviceEntry: RegisteredDeviceConfig = {
       id: cleanId,
+      organizationId: newDevOrganizationId || DEFAULT_ORGANIZATION.id,
       name: cleanName,
       category: newDevCategory,
       sectorName: newDevSector.trim() || 'Faena Central',
@@ -563,6 +585,9 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
   const handleImportRTDBDevice = async (rtDev: SensorDevice, category: DeviceCategory) => {
     const newEntry: RegisteredDeviceConfig = {
       id: rtDev.id,
+      organizationId:
+        rtDev.organizationId ||
+        (activeOrganizationId && activeOrganizationId !== 'all' ? activeOrganizationId : DEFAULT_ORGANIZATION.id),
       name: rtDev.name || rtDev.id,
       category,
       sectorName: rtDev.sectorName || 'Faena Central',
@@ -618,8 +643,71 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
     setNewDevName(dev.name);
     setNewDevCategory(dev.category);
     setNewDevSector(dev.sectorName);
+    setNewDevOrganizationId(dev.organizationId || DEFAULT_ORGANIZATION.id);
     setNewDevParentGateway(dev.parentGatewayId || '');
     setNewDevLocalIp(dev.localIp || '192.168.4.1');
+  };
+
+  const handleSaveOrg = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!orgName.trim()) {
+      showNotice('error', 'El nombre de la organización es obligatorio.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const existing = editingOrgId ? organizations.find((o) => o.id === editingOrgId) : undefined;
+      const cleanId =
+        editingOrgId ||
+        `org-${orgName
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '')}-${Date.now().toString().slice(-4)}`;
+      await saveOrganizationToRTDB(
+        {
+          id: cleanId,
+          name: orgName.trim(),
+          rut: orgRut.trim(),
+          industry: orgIndustry.trim() || 'Minería',
+          status: orgStatus,
+          createdAt: existing?.createdAt || Date.now(),
+        },
+        currentUser
+      );
+      soundAlert.playFeedbackBeep();
+      showNotice(
+        'success',
+        editingOrgId
+          ? `Organización "${orgName.trim()}" actualizada en Firebase RTDB.`
+          : `Organización "${orgName.trim()}" creada en Firebase RTDB.`
+      );
+      setEditingOrgId(null);
+      setOrgName('');
+      setOrgRut('');
+      setOrgIndustry('Minería Subterránea & Rajo');
+      setOrgStatus('activa');
+    } catch (err: any) {
+      showNotice('error', err?.message || 'Error al guardar organización en Firebase RTDB.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteOrg = async (org: Organization) => {
+    setIsSaving(true);
+    try {
+      await deleteOrganizationFromRTDB(org.id, currentUser);
+      if (activeOrganizationId === org.id && onSelectOrganization) {
+        onSelectOrganization('all');
+      }
+      soundAlert.playFeedbackBeep();
+      showNotice('success', `Organización "${org.name}" eliminada.`);
+    } catch (err: any) {
+      showNotice('error', err?.message || 'No se pudo eliminar la organización.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSaveAll = async () => {
@@ -775,6 +863,22 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
             <span>Dispositivos (Sensores y Gateways)</span>
             <span className="px-1.5 py-0.5 rounded bg-black/40 text-[10px] font-mono">
               {registeredDevices.filter((d) => d.enabled).length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSubTab('organizations')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-colors border ${
+              subTab === 'organizations'
+                ? 'bg-cyan-950/90 text-cyan-200 border-cyan-500 shadow-sm'
+                : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-white'
+            }`}
+          >
+            <Building2 className="w-4 h-4 text-cyan-400" />
+            <span>Empresas / Organizaciones</span>
+            <span className="px-1.5 py-0.5 rounded bg-black/40 text-[10px] font-mono">
+              {organizations.length}
             </span>
           </button>
         </div>
@@ -1298,7 +1402,7 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                                 : 'bg-slate-800 text-slate-300'
                             }`}
                           >
-                            {mainOverrideCount > 0 ? `${mainOverrideCount}/8` : '8'}
+                            {mainOverrideCount > 0 ? `${mainOverrideCount}/${CONTROLLABLE_WINDOWS.length}` : `${CONTROLLABLE_WINDOWS.length}`}
                           </span>
                         </button>
                         <button
@@ -2186,6 +2290,23 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                 />
               </div>
 
+              {organizations.length > 0 && (
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">Organización / Empresa</label>
+                  <select
+                    value={newDevOrganizationId}
+                    onChange={(e) => setNewDevOrganizationId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white"
+                  >
+                    {organizations.map((org) => (
+                      <option key={org.id} value={org.id}>
+                        {org.name} ({org.rut || org.id})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {newDevCategory === 'sensor' && (
                 <div>
                   <label className="text-slate-300 font-semibold block mb-1">
@@ -2433,6 +2554,218 @@ export const SuperAdminControlView: React.FC<SuperAdminControlViewProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* SUB-TAB 5: ORGANIZACIONES MULTI-EMPRESA (/organizaciones)            */}
+      {/* ==================================================================== */}
+      {subTab === 'organizations' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-5 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4">
+            <div className="pb-3 border-b border-slate-800 flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-cyan-400" />
+                  {editingOrgId ? 'Editar Organización' : 'Nueva Empresa / Organización'}
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Crea y administra empresas mandantes o divisiones para filtrar faenas, usuarios, dispositivos y alertas en modo multi-empresa.
+                </p>
+              </div>
+              {editingOrgId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingOrgId(null);
+                    setOrgName('');
+                    setOrgRut('');
+                    setOrgIndustry('Minería Subterránea & Rajo');
+                    setOrgStatus('activa');
+                  }}
+                  className="text-[11px] text-slate-400 hover:text-white underline"
+                >
+                  Cancelar edición
+                </button>
+              )}
+            </div>
+
+            <form onSubmit={handleSaveOrg} className="space-y-3.5 text-xs">
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">Nombre Comercial / Faena Mandante</label>
+                <input
+                  type="text"
+                  required
+                  value={orgName}
+                  onChange={(e) => setOrgName(e.target.value)}
+                  placeholder="Ej: Minera Los Bronces División Sur"
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">RUT Empresa</label>
+                  <input
+                    type="text"
+                    value={orgRut}
+                    onChange={(e) => setOrgRut(e.target.value)}
+                    placeholder="76.123.456-7"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">Estado Operativo</label>
+                  <select
+                    value={orgStatus}
+                    onChange={(e) => setOrgStatus(e.target.value as 'activa' | 'suspendida')}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white"
+                  >
+                    <option value="activa">Activa</option>
+                    <option value="suspendida">Suspendida</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">Rubro / Tipo de Operación</label>
+                <input
+                  type="text"
+                  value={orgIndustry}
+                  onChange={(e) => setOrgIndustry(e.target.value)}
+                  placeholder="Minería Subterránea & Rajo"
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="w-full py-2.5 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {editingOrgId ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                <span>
+                  {isSaving
+                    ? 'Guardando en Firebase RTDB...'
+                    : editingOrgId
+                    ? 'Guardar Cambios de Organización'
+                    : 'Registrar Organización en RTDB'}
+                </span>
+              </button>
+            </form>
+          </div>
+
+          <div className="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4">
+            <div className="pb-3 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-cyan-400" />
+                  Organizaciones Registradas ({organizations.length})
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Cambia el contexto activo para filtrar el dashboard, equipos, usuarios y faenas por empresa.
+                </p>
+              </div>
+              {onSelectOrganization && (
+                <button
+                  type="button"
+                  onClick={() => onSelectOrganization('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${
+                    activeOrganizationId === 'all'
+                      ? 'bg-cyan-600 text-white border-cyan-400'
+                      : 'bg-slate-950 text-slate-300 border-slate-700 hover:border-cyan-500'
+                  }`}
+                >
+                  Ver Todas las Empresas
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              {organizations.map((org) => {
+                const isSelectedOrg = activeOrganizationId === org.id;
+                const isDefaultOrg = org.id === DEFAULT_ORGANIZATION.id;
+                return (
+                  <div
+                    key={org.id}
+                    className={`p-4 rounded-xl border transition-colors ${
+                      isSelectedOrg
+                        ? 'bg-cyan-950/40 border-cyan-500'
+                        : 'bg-slate-950/70 border-slate-800'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-bold text-sm text-white">{org.name}</span>
+                          {isDefaultOrg && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-700">
+                              Principal
+                            </span>
+                          )}
+                          <span
+                            className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${
+                              org.status === 'activa'
+                                ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
+                                : 'bg-rose-950 text-rose-300 border-rose-700'
+                            }`}
+                          >
+                            {org.status}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-mono mt-1 flex flex-wrap gap-3">
+                          <span>ID: {org.id}</span>
+                          {org.rut && <span>RUT: {org.rut}</span>}
+                          {org.industry && <span>Rubro: {org.industry}</span>}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {onSelectOrganization && (
+                          <button
+                            type="button"
+                            onClick={() => onSelectOrganization(org.id)}
+                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border ${
+                              isSelectedOrg
+                                ? 'bg-cyan-600 text-white border-cyan-400'
+                                : 'bg-slate-900 hover:bg-slate-800 text-cyan-300 border-slate-700'
+                            }`}
+                          >
+                            {isSelectedOrg ? 'Contexto Activo' : 'Activar Filtro'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingOrgId(org.id);
+                            setOrgName(org.name);
+                            setOrgRut(org.rut || '');
+                            setOrgIndustry(org.industry || 'Minería');
+                            setOrgStatus(org.status || 'activa');
+                          }}
+                          className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700"
+                          title="Editar organización"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        {!isDefaultOrg && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteOrg(org)}
+                            disabled={isSaving}
+                            className="p-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 disabled:opacity-50"
+                            title="Eliminar organización"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

@@ -27,7 +27,7 @@ import {
   Gauge,
   ShieldCheck
 } from 'lucide-react';
-import { PlatformConfig, SensorDevice, UserProfile, UserRole } from '../types';
+import { PlatformConfig, SensorDevice, TelemetryHistoryPoint, UserProfile, UserRole } from '../types';
 
 interface InteractiveDeviceChartAndUsersProps {
   currentUser?: UserProfile | null;
@@ -39,6 +39,8 @@ interface InteractiveDeviceChartAndUsersProps {
   onChangeUserModal?: () => void;
   activeAlertCount?: number;
   platformConfig?: PlatformConfig;
+  telemetryHistory?: TelemetryHistoryPoint[];
+  siteName?: string;
 }
 
 export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndUsersProps> = ({
@@ -51,6 +53,8 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
   onChangeUserModal,
   activeAlertCount = 0,
   platformConfig,
+  telemetryHistory = [],
+  siteName,
 }) => {
   const [userSearchTerm, setUserSearchTerm] = useState('');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<'todos' | UserRole>('todos');
@@ -119,27 +123,37 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
   const operadorCount = usersList.filter(u => u.role === 'operador').length;
   const onlineDevicesCount = devices.filter(d => d.status !== 'desconectado').length;
 
-  // Extract readings for the currently selected device
-  const coValue = currentDevice?.rawCO !== undefined ? currentDevice.rawCO : (currentDevice?.metrics?.co ?? 8.2);
-  const pm25Value = currentDevice?.rawPM25 !== undefined ? currentDevice.rawPM25 : (currentDevice?.metrics?.polvoPM ?? 22.0);
-  const tempValue = currentDevice?.rawTemp !== undefined ? currentDevice.rawTemp : (currentDevice?.metrics?.temperatura ?? 22.4);
-  const humValue = currentDevice?.rawHum !== undefined ? currentDevice.rawHum : (currentDevice?.metrics?.humedad ?? 54.0);
-  const co2Value = currentDevice?.metrics?.co2 ?? 760;
-  const airFlowValue = currentDevice?.metrics?.flujoAire ?? 0.85;
-  const ch4Value = currentDevice?.metrics?.ch4 ?? 0.8;
-  const noiseValue = currentDevice?.metrics?.ruido ?? 74;
-  const o2Value = currentDevice?.metrics?.o2 ?? 20.8;
-  const batteryPct = currentDevice?.batteryPct ?? 90;
+  // Extract real readings for the currently selected device (respecting sensor faultFields)
+  const faultSet = new Set(currentDevice?.faultFields || []);
+  const coFault = faultSet.has('CO');
+  const pmFault = faultSet.has('PM2_5');
+  const tempFault = faultSet.has('temperatura');
+  const humFault = faultSet.has('humedad');
+
+  const isRawCO = currentDevice?.rawCO !== undefined;
+  const isRawPM25 = currentDevice?.rawPM25 !== undefined;
+  const coValue = coFault ? 0 : (isRawCO ? currentDevice!.rawCO! : (currentDevice?.metrics?.co ?? 0));
+  const pm25Value = pmFault ? 0 : (isRawPM25 ? currentDevice!.rawPM25! : (currentDevice?.metrics?.polvoPM ?? 0));
+  const tempValue = tempFault ? 0 : (currentDevice?.rawTemp !== undefined ? currentDevice.rawTemp : (currentDevice?.metrics?.temperatura ?? 0));
+  const humValue = humFault ? 0 : (currentDevice?.rawHum !== undefined ? currentDevice.rawHum : (currentDevice?.metrics?.humedad ?? 0));
+  const co2Value = currentDevice?.metrics?.co2 ?? 0;
+  const airFlowValue = currentDevice?.metrics?.flujoAire ?? 0;
+  const ch4Value = currentDevice?.metrics?.ch4 ?? 0;
+  const noiseValue = currentDevice?.metrics?.ruido ?? 0;
+  const o2Value = currentDevice?.metrics?.o2 ?? 0;
+  const batteryPct = currentDevice?.batteryPct ?? 0;
 
   const pm = platformConfig?.metrics;
   const tempSafe = pm?.tempPreventivo ?? 28;
   const tempCrit = pm?.tempCritico ?? 32;
   const humSafe = pm?.humPreventivo ?? 70;
   const humCrit = pm?.humCritico ?? 85;
-  const coSafe = pm?.coChartSafeMax ?? 50;
+  const coSafe = isRawCO ? (pm?.coPreventivo ?? 300) : (pm?.coChartSafeMax ?? 50);
+  const coCrit = isRawCO ? (pm?.coCritico ?? 1200) : coSafe * 2;
   const co2Safe = pm?.co2SafeMax ?? 1000;
   const co2Crit = pm?.co2CriticalMax ?? 2000;
-  const pm25Safe = pm?.pm25ChartSafeMax ?? 50;
+  const pm25Safe = isRawPM25 ? (pm?.pm25Preventivo ?? 350) : (pm?.pm25ChartSafeMax ?? 50);
+  const pm25Crit = isRawPM25 ? (pm?.pm25Critico ?? 1200) : pm25Safe * 3;
   const ch4Safe = pm?.ch4SafeMax ?? 1.5;
   const ch4Crit = pm?.ch4CriticalMax ?? 5.0;
   const airMin = pm?.airFlowMin ?? 0.5;
@@ -162,9 +176,9 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
       icon: <Thermometer className="w-4 h-4 text-cyan-400" />,
       gradient: 'from-cyan-500 to-blue-600',
       glowColor: 'shadow-cyan-500/30',
-      badgeColor: tempValue > tempCrit ? 'bg-rose-950 text-rose-300 border-rose-800' : tempValue > tempSafe ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-cyan-950 text-cyan-300 border-cyan-800',
-      textColor: tempValue > tempCrit ? 'text-rose-400' : tempValue > tempSafe ? 'text-amber-400' : 'text-cyan-400',
-      status: tempValue > tempCrit ? 'Calor' : tempValue > tempSafe ? 'Alerta' : 'Óptimo',
+      badgeColor: tempFault ? 'bg-amber-950 text-amber-300 border-amber-700' : tempValue > tempCrit ? 'bg-rose-950 text-rose-300 border-rose-800' : tempValue > tempSafe ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-cyan-950 text-cyan-300 border-cyan-800',
+      textColor: tempFault ? 'text-amber-400' : tempValue > tempCrit ? 'text-rose-400' : tempValue > tempSafe ? 'text-amber-400' : 'text-cyan-400',
+      status: tempFault ? 'FALLA' : tempValue > tempCrit ? 'Calor' : tempValue > tempSafe ? 'Alerta' : 'Óptimo',
       norm: `DS 132: ${pm?.tempMin ?? 18}° - ${tempSafe}°C`
     },
     {
@@ -179,27 +193,27 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
       icon: <Droplets className="w-4 h-4 text-blue-400" />,
       gradient: 'from-blue-500 to-indigo-600',
       glowColor: 'shadow-blue-500/30',
-      badgeColor: humValue > humCrit ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-blue-950 text-blue-300 border-blue-800',
-      textColor: humValue > humCrit ? 'text-amber-400' : 'text-blue-400',
-      status: humValue > humCrit ? 'Elevada' : 'Normal',
+      badgeColor: humFault ? 'bg-amber-950 text-amber-300 border-amber-700' : humValue > humCrit ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-blue-950 text-blue-300 border-blue-800',
+      textColor: humFault ? 'text-amber-400' : humValue > humCrit ? 'text-amber-400' : 'text-blue-400',
+      status: humFault ? 'FALLA' : humValue > humCrit ? 'Elevada' : 'Normal',
       norm: `DS 132: ${pm?.humMin ?? 40}% - ${humSafe}%`
     },
     {
       id: 'co',
-      name: 'Monóxido CO (MQ-2)',
+      name: isRawCO ? 'Gas MQ-2 (ADC)' : 'Monóxido CO (MQ-2)',
       shortName: 'CO (MQ2)',
-      unit: 'ppm',
+      unit: isRawCO ? 'ADC' : 'ppm',
       value: Number(coValue.toFixed(1)),
       safeMax: coSafe,
-      criticalMax: coSafe * 2,
-      scaleMax: Math.max(100, coSafe * 2),
+      criticalMax: coCrit,
+      scaleMax: isRawCO ? Math.max(4095, coCrit) : Math.max(100, coCrit),
       icon: <Flame className="w-4 h-4 text-orange-400" />,
-      gradient: coValue > coSafe ? 'from-rose-600 to-red-500' : coValue > coSafe * 0.5 ? 'from-amber-500 to-orange-500' : 'from-emerald-500 to-teal-500',
-      glowColor: coValue > coSafe ? 'shadow-rose-500/40' : 'shadow-orange-500/30',
-      badgeColor: coValue > coSafe ? 'bg-rose-950 text-rose-300 border-rose-800 animate-pulse' : coValue > coSafe * 0.5 ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-emerald-950 text-emerald-300 border-emerald-800',
-      textColor: coValue > coSafe ? 'text-rose-400' : coValue > coSafe * 0.5 ? 'text-amber-400' : 'text-emerald-400',
-      status: coValue > coSafe ? 'Peligro' : coValue > coSafe * 0.5 ? 'Alerta' : 'Seguro',
-      norm: `DS 132: LPP ≤ ${coSafe} ppm`
+      gradient: coValue >= coCrit ? 'from-rose-600 to-red-500' : coValue >= coSafe ? 'from-amber-500 to-orange-500' : 'from-emerald-500 to-teal-500',
+      glowColor: coValue >= coCrit ? 'shadow-rose-500/40' : 'shadow-orange-500/30',
+      badgeColor: coFault ? 'bg-amber-950 text-amber-300 border-amber-700' : coValue >= coCrit ? 'bg-rose-950 text-rose-300 border-rose-800 animate-pulse' : coValue >= coSafe ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-emerald-950 text-emerald-300 border-emerald-800',
+      textColor: coFault ? 'text-amber-400' : coValue >= coCrit ? 'text-rose-400' : coValue >= coSafe ? 'text-amber-400' : 'text-emerald-400',
+      status: coFault ? 'FALLA' : coValue >= coCrit ? 'Peligro' : coValue >= coSafe ? 'Alerta' : 'Seguro',
+      norm: isRawCO ? `ESP32 ADC · Prev ≤ ${coSafe}` : `DS 132: LPP ≤ ${coSafe} ppm`
     },
     {
       id: 'co2',
@@ -220,20 +234,20 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
     },
     {
       id: 'pm25',
-      name: 'Polvo en Suspensión',
+      name: isRawPM25 ? 'Polvo PM2.5 (ADC)' : 'Polvo en Suspensión',
       shortName: 'PM2.5',
-      unit: 'µg/m³',
+      unit: isRawPM25 ? 'ADC' : 'µg/m³',
       value: Number(pm25Value.toFixed(1)),
       safeMax: pm25Safe,
-      criticalMax: pm25Safe * 3,
-      scaleMax: Math.max(150, pm25Safe * 3),
+      criticalMax: pm25Crit,
+      scaleMax: isRawPM25 ? Math.max(4095, pm25Crit) : Math.max(150, pm25Crit),
       icon: <Layers className="w-4 h-4 text-amber-300" />,
-      gradient: pm25Value > pm25Safe * 3 ? 'from-rose-500 to-red-600' : pm25Value > pm25Safe ? 'from-amber-500 to-yellow-500' : 'from-cyan-500 to-teal-500',
+      gradient: pm25Value >= pm25Crit ? 'from-rose-500 to-red-600' : pm25Value >= pm25Safe ? 'from-amber-500 to-yellow-500' : 'from-cyan-500 to-teal-500',
       glowColor: 'shadow-amber-500/30',
-      badgeColor: pm25Value > pm25Safe * 3 ? 'bg-rose-950 text-rose-300 border-rose-800 animate-pulse' : pm25Value > pm25Safe ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-cyan-950 text-cyan-300 border-cyan-800',
-      textColor: pm25Value > pm25Safe * 3 ? 'text-rose-400' : pm25Value > pm25Safe ? 'text-amber-400' : 'text-cyan-400',
-      status: pm25Value > pm25Safe * 3 ? 'Crítico' : pm25Value > pm25Safe ? 'Moderado' : 'Óptimo',
-      norm: `DS 132: LPP ≤ ${pm25Safe} µg/m³`
+      badgeColor: pmFault ? 'bg-amber-950 text-amber-300 border-amber-700' : pm25Value >= pm25Crit ? 'bg-rose-950 text-rose-300 border-rose-800 animate-pulse' : pm25Value >= pm25Safe ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-cyan-950 text-cyan-300 border-cyan-800',
+      textColor: pmFault ? 'text-amber-400' : pm25Value >= pm25Crit ? 'text-rose-400' : pm25Value >= pm25Safe ? 'text-amber-400' : 'text-cyan-400',
+      status: pmFault ? 'FALLA' : pm25Value >= pm25Crit ? 'Crítico' : pm25Value >= pm25Safe ? 'Moderado' : 'Óptimo',
+      norm: isRawPM25 ? `ESP32 ADC · Prev ≤ ${pm25Safe}` : `DS 132: LPP ≤ ${pm25Safe} µg/m³`
     },
     {
       id: 'ch4',
@@ -305,81 +319,42 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
     }
   ];
 
-  // Multi-sensor timeline readings for the shift
-  const timelineReadings = [
-    { 
-      hour: '00:00', 
-      temp: tempValue - 1.2, 
-      hum: humValue - 3, 
-      co: Math.max(2, coValue - 3.1), 
-      co2: Math.max(450, co2Value - 60), 
-      pm25: Math.max(5, pm25Value - 6.5),
-      ch4: Math.max(0.1, ch4Value - 0.2),
-      airFlow: airFlowValue + 0.15,
-      noise: noiseValue - 5,
-      o2: 20.9
-    },
-    { 
-      hour: '04:00', 
-      temp: tempValue - 0.8, 
-      hum: humValue - 1, 
-      co: Math.max(3, coValue - 2.0), 
-      co2: Math.max(500, co2Value - 40), 
-      pm25: Math.max(8, pm25Value - 4.0),
-      ch4: Math.max(0.2, ch4Value - 0.1),
-      airFlow: airFlowValue + 0.1,
-      noise: noiseValue - 3,
-      o2: 20.8
-    },
-    { 
-      hour: '08:00', 
-      temp: tempValue + 0.3, 
-      hum: humValue + 2, 
-      co: coValue + 1.2, 
-      co2: co2Value + 50, 
-      pm25: pm25Value + 3.0,
-      ch4: ch4Value + 0.1,
-      airFlow: airFlowValue,
-      noise: noiseValue + 2,
-      o2: 20.7
-    },
-    { 
-      hour: '12:00', 
-      temp: tempValue + 1.5, 
-      hum: humValue + 4, 
-      co: coValue + 3.8, 
-      co2: co2Value + 120, 
-      pm25: pm25Value + 7.5,
-      ch4: ch4Value + 0.3,
-      airFlow: airFlowValue - 0.05,
-      noise: noiseValue + 4,
-      o2: 20.6
-    },
-    { 
-      hour: '16:00', 
-      temp: tempValue + 0.8, 
-      hum: humValue + 1, 
-      co: coValue + 1.5, 
-      co2: co2Value + 60, 
-      pm25: pm25Value + 3.8,
-      ch4: ch4Value + 0.1,
-      airFlow: airFlowValue,
-      noise: noiseValue + 1,
-      o2: 20.8
-    },
-    { 
-      hour: '20:00 (Actual)', 
-      temp: tempValue, 
-      hum: humValue, 
-      co: coValue, 
-      co2: co2Value, 
-      pm25: pm25Value,
-      ch4: ch4Value,
-      airFlow: airFlowValue,
-      noise: noiseValue,
-      o2: o2Value
-    },
-  ];
+  // Real timeline readings sourced exclusively from /historial_telemetria in RTDB
+  const recentHistory = telemetryHistory.slice(-6);
+  const timelineReadings =
+    recentHistory.length > 0
+      ? recentHistory.map((pt, idx) => ({
+          hour:
+            idx === recentHistory.length - 1
+              ? 'Última'
+              : new Date(pt.timestamp).toLocaleTimeString('es-CL', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                }),
+          temp: typeof pt.temperatura === 'number' ? pt.temperatura : tempValue,
+          hum: typeof pt.humedad === 'number' ? pt.humedad : humValue,
+          co: typeof pt.co === 'number' ? pt.co : coValue,
+          co2: co2Value,
+          pm25: typeof pt.pm25 === 'number' ? pt.pm25 : pm25Value,
+          ch4: ch4Value,
+          airFlow: airFlowValue,
+          noise: noiseValue,
+          o2: o2Value,
+        }))
+      : [
+          {
+            hour: 'Actual (en vivo)',
+            temp: tempValue,
+            hum: humValue,
+            co: coValue,
+            co2: co2Value,
+            pm25: pm25Value,
+            ch4: ch4Value,
+            airFlow: airFlowValue,
+            noise: noiseValue,
+            o2: o2Value,
+          },
+        ];
 
   return (
     <div className="space-y-6">
@@ -401,7 +376,7 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-1.5">
-                  Bienvenido, {currentUser?.name || 'Manuel Crisóstomo'} 👋
+                  Bienvenido, {currentUser?.name || 'Usuario Autenticado'}
                 </h2>
                 
                 {/* User Role highlighted badge */}
@@ -416,7 +391,7 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
                 <span>•</span>
                 <span className="text-slate-300 font-medium">{currentUser?.shift || 'Turno Continuo 7x7'}</span>
                 <span>•</span>
-                <span className="text-cyan-400 font-mono">Faena El Teniente</span>
+                <span className="text-cyan-400 font-mono">{siteName || currentDevice?.sectorName || 'Faena Minera Central'}</span>
               </p>
             </div>
           </div>
@@ -853,6 +828,13 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
                   )}
                 </div>
 
+                {/* Honest Telemetry History Notice */}
+                {recentHistory.length < 2 && (
+                  <div className="mb-3 px-3 py-2 rounded-lg bg-slate-900/90 border border-slate-800 text-[11px] text-slate-400">
+                    Muestras reales en RTDB: <strong className="text-cyan-300">{recentHistory.length}</strong>. Mostrando lectura real sin interpolación simulada; la serie crecerá conforme el nodo transmita nuevos paquetes.
+                  </div>
+                )}
+
                 {/* Multi-Bar Timeline Chart */}
                 <div className="h-44 w-full flex items-end justify-between gap-2 pt-2 px-1">
                   {timelineReadings.map((reading, index) => {
@@ -863,8 +845,8 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
                           {(timelineGroup === 'gases' || timelineGroup === 'todos') && (
                             <div 
                               className="flex-1 max-w-[14px] bg-gradient-to-t from-orange-600 to-orange-400 rounded-t-sm transition-all duration-300 group-hover:brightness-125"
-                              style={{ height: `${Math.min(100, Math.max(12, (reading.co / 50) * 100))}%` }}
-                              title={`CO: ${reading.co.toFixed(1)} ppm`}
+                              style={{ height: `${Math.min(100, Math.max(12, (reading.co / Math.max(50, coSafe)) * 100))}%` }}
+                              title={`CO: ${reading.co.toFixed(1)} ${isRawCO ? 'ADC' : 'ppm'}`}
                             />
                           )}
 
@@ -872,8 +854,8 @@ export const InteractiveDeviceChartAndUsers: React.FC<InteractiveDeviceChartAndU
                           {(timelineGroup === 'gases' || timelineGroup === 'todos') && (
                             <div 
                               className="flex-1 max-w-[14px] bg-gradient-to-t from-cyan-600 to-cyan-400 rounded-t-sm transition-all duration-300 group-hover:brightness-125"
-                              style={{ height: `${Math.min(100, Math.max(12, (reading.pm25 / 100) * 100))}%` }}
-                              title={`PM2.5: ${reading.pm25.toFixed(1)} µg/m³`}
+                              style={{ height: `${Math.min(100, Math.max(12, (reading.pm25 / Math.max(100, pm25Safe)) * 100))}%` }}
+                              title={`PM2.5: ${reading.pm25.toFixed(1)} ${isRawPM25 ? 'ADC' : 'µg/m³'}`}
                             />
                           )}
 

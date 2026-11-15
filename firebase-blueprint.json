@@ -1,93 +1,161 @@
 {
   "entities": {
-    "user": {
-      "title": "UserProfile",
-      "description": "MineSafe registered user profile with role and assignment",
+    "admin": {
+      "title": "AdminRole",
+      "description": "Trusted administrator registry document keyed by Firebase Auth UID",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "email": { "type": "string", "format": "email" },
-        "role": { "type": "string", "enum": ["superadmin", "admin", "operador"] },
-        "roleLabel": { "type": "string" },
-        "rut": { "type": "string" },
-        "shift": { "type": "string" },
-        "status": { "type": "string", "enum": ["activo", "inactivo"] },
-        "lastLogin": { "type": "string" },
-        "assignedSector": { "type": "string" },
-        "assignedDeviceCode": { "type": "string" }
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["superadmin", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["name", "email", "role"]
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "organization": {
+      "title": "Organization",
+      "description": "Mining company or multi-tenant enterprise grouping sites, devices and personnel",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "rut": { "type": "string", "maxLength": 32 },
+        "industry": { "type": "string", "maxLength": 100 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "type": "string", "enum": ["activa", "suspendida"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "ownerId", "status", "createdAt", "updatedAt"]
+    },
+    "user": {
+      "title": "UserProfile",
+      "description": "MineSafe registered user profile with role, organization and assignment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["superadmin", "admin", "operador"] },
+        "roleLabel": { "type": "string", "maxLength": 80 },
+        "organizationId": { "type": "string", "maxLength": 128 },
+        "rut": { "type": "string", "maxLength": 32 },
+        "shift": { "type": "string", "maxLength": 80 },
+        "status": { "type": "string", "enum": ["activo", "inactivo"] },
+        "lastLogin": { "type": "string", "maxLength": 64 },
+        "assignedSector": { "type": "string", "maxLength": 120 },
+        "assignedDeviceCode": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "email", "role", "status", "createdAt", "updatedAt"]
     },
     "device": {
       "title": "SensorDevice",
       "description": "IoT sensor device telemetry in mine sector",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "code": { "type": "string" },
-        "name": { "type": "string" },
-        "type": { "type": "string" },
-        "sectorId": { "type": "string" },
-        "sectorName": { "type": "string" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "organizationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "type": { "type": "string", "maxLength": 64 },
+        "sectorId": { "type": "string", "maxLength": 128 },
+        "sectorName": { "type": "string", "maxLength": 120 },
         "batteryPct": { "type": "number" },
-        "signalStrength": { "type": "string" },
-        "lastPing": { "type": "string" },
-        "status": { "type": "string", "enum": ["normal", "advertencia", "critico", "desconectado"] },
-        "assignedTo": { "type": "string" },
-        "metrics": { "type": "object" }
+        "signalStrength": { "type": "string", "maxLength": 32 },
+        "lastPing": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["normal", "preventivo", "advertencia", "critico", "desconectado"] },
+        "assignedTo": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["code", "name", "status"]
+      "required": ["id", "ownerId", "organizationId", "code", "name", "status", "createdAt", "updatedAt"]
     },
     "alert": {
       "title": "SafetyAlert",
       "description": "Mine safety and atmospheric contingency alert",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "code": { "type": "string" },
-        "title": { "type": "string" },
-        "severity": { "type": "string", "enum": ["normal", "advertencia", "critico", "desconectado"] },
-        "variableName": { "type": "string" },
-        "sensorId": { "type": "string" },
-        "sensorCode": { "type": "string" },
-        "sectorName": { "type": "string" },
-        "recordedValue": { "type": "string" },
-        "safeLimit": { "type": "string" },
-        "timestamp": { "type": "string" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "organizationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "severity": { "type": "string", "enum": ["normal", "preventivo", "advertencia", "critico", "desconectado"] },
+        "variableName": { "type": "string", "maxLength": 80 },
+        "sensorId": { "type": "string", "maxLength": 128 },
+        "sensorCode": { "type": "string", "maxLength": 64 },
+        "sectorName": { "type": "string", "maxLength": 120 },
+        "recordedValue": { "type": "string", "maxLength": 64 },
+        "safeLimit": { "type": "string", "maxLength": 64 },
         "acknowledged": { "type": "boolean" },
-        "acknowledgedBy": { "type": "string" },
+        "acknowledgedBy": { "type": "string", "maxLength": 120 },
         "resolved": { "type": "boolean" },
-        "suggestedAction": { "type": "string" }
+        "status": { "type": "string", "enum": ["activa", "resuelta"] },
+        "closingTitle": { "type": "string", "maxLength": 180 },
+        "suggestedAction": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["code", "title", "severity"]
+      "required": ["id", "ownerId", "organizationId", "code", "title", "severity", "acknowledged", "resolved", "status", "createdAt", "updatedAt"]
     },
     "rental": {
       "title": "DeviceRental",
       "description": "IoT equipment rental contract and payment status",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "contractNumber": { "type": "string" },
-        "deviceCode": { "type": "string" },
-        "deviceType": { "type": "string" },
-        "provider": { "type": "string" },
-        "startDate": { "type": "string" },
-        "endDate": { "type": "string" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "organizationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "contractNumber": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "deviceCode": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "deviceType": { "type": "string", "maxLength": 120 },
+        "provider": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "startDate": { "type": "string", "maxLength": 32 },
+        "endDate": { "type": "string", "maxLength": 32 },
         "monthlyCostClp": { "type": "number" },
-        "paymentStatus": { "type": "string" },
-        "lastPaymentDate": { "type": "string" },
-        "nextDueDate": { "type": "string" },
-        "assignedTechnician": { "type": "string" },
-        "notes": { "type": "string" }
+        "paymentStatus": { "type": "string", "enum": ["al_dia", "proximo_a_vencer", "pago_pendiente", "vencido"] },
+        "assignedTechnician": { "type": "string", "maxLength": 120 },
+        "notes": { "type": "string", "maxLength": 600 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["contractNumber", "deviceCode", "provider"]
+      "required": ["id", "ownerId", "organizationId", "contractNumber", "deviceCode", "provider", "monthlyCostClp", "paymentStatus", "createdAt", "updatedAt"]
+    },
+    "attachment": {
+      "title": "AlertAttachment",
+      "description": "Uploaded evidence file metadata attached to a contingency or audit alert",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "alertId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "organizationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "fileName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "contentType": { "type": "string", "enum": ["image/jpeg", "image/png", "image/webp", "application/pdf"] },
+        "sizeBytes": { "type": "number" },
+        "downloadUrl": { "type": "string", "minLength": 10, "maxLength": 1024 },
+        "storagePath": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "uploadedBy": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "alertId", "ownerId", "organizationId", "fileName", "contentType", "sizeBytes", "downloadUrl", "storagePath", "uploadedBy", "createdAt"]
     }
   },
   "firestore": {
+    "/admins/{adminId}": {
+      "schema": "#/entities/admin",
+      "description": "Trusted administrator lookup documents"
+    },
+    "/organizations/{organizationId}": {
+      "schema": "#/entities/organization",
+      "description": "Multi-tenant mining organizations"
+    },
     "/users/{userId}": {
       "schema": "#/entities/user",
-      "description": "Registered MineSafe users"
+      "description": "Registered MineSafe users (PII isolated to owner and admin)"
     },
     "/devices/{deviceId}": {
       "schema": "#/entities/device",
@@ -100,6 +168,10 @@
     "/rentals/{rentalId}": {
       "schema": "#/entities/rental",
       "description": "Equipment rental contracts"
+    },
+    "/attachments/{attachmentId}": {
+      "schema": "#/entities/attachment",
+      "description": "Uploaded evidence attachments linked to safety alerts"
     }
   }
 }

@@ -1,14 +1,15 @@
-import { 
-  SensorDevice, 
-  DeviceThresholdsConfig, 
-  AlertEventRecord, 
+import {
+  SensorDevice,
+  DeviceThresholdsConfig,
+  AlertEventRecord,
   AlertThresholdLevel,
   SafetyAlert
 } from '../types';
-import { 
-  saveAlertThresholdEvent, 
+import {
+  saveAlertThresholdEvent,
   updateAlertThresholdEvent,
-  DEFAULT_GLOBAL_THRESHOLDS 
+  closeAlertLifecycleInRTDB,
+  DEFAULT_GLOBAL_THRESHOLDS
 } from './firebase';
 import { soundAlert } from './audioAlert';
 
@@ -22,13 +23,42 @@ interface ActiveIncident {
   lastValue: number;
 }
 
-class AlertEngine {
-  // Mapa de incidentes activos para prevenir alertas duplicadas (anti-flapping)
-  private activeIncidents: Map<string, ActiveIncident> = new Map();
+export interface AlertEnginePersistenceHandlers {
+  saveEvent?: (event: AlertEventRecord) => Promise<void>;
+  updateEvent?: (eventId: string, updates: Partial<AlertEventRecord>) => Promise<void>;
+  closeAlert?: (alertId: string, reason: string, options?: { clearEmergencyIfNone?: boolean }) => Promise<void>;
+  playSound?: (level: 'advertencia' | 'critico') => void;
+}
 
-  // Memoria de configs por dispositivo
+class AlertEngine {
+  private activeIncidents: Map<string, ActiveIncident> = new Map();
   private deviceConfigs: Map<string, DeviceThresholdsConfig> = new Map();
   private globalConfig: DeviceThresholdsConfig = DEFAULT_GLOBAL_THRESHOLDS;
+
+  private persistenceHandlers: Required<AlertEnginePersistenceHandlers> = {
+    saveEvent: saveAlertThresholdEvent,
+    updateEvent: updateAlertThresholdEvent,
+    closeAlert: closeAlertLifecycleInRTDB,
+    playSound: (level) => soundAlert.playAlert(level),
+  };
+
+  public setPersistenceHandlers(handlers: AlertEnginePersistenceHandlers): void {
+    this.persistenceHandlers = {
+      saveEvent: handlers.saveEvent || saveAlertThresholdEvent,
+      updateEvent: handlers.updateEvent || updateAlertThresholdEvent,
+      closeAlert: handlers.closeAlert || closeAlertLifecycleInRTDB,
+      playSound: handlers.playSound || ((level) => soundAlert.playAlert(level)),
+    };
+  }
+
+  public resetPersistenceHandlers(): void {
+    this.persistenceHandlers = {
+      saveEvent: saveAlertThresholdEvent,
+      updateEvent: updateAlertThresholdEvent,
+      closeAlert: closeAlertLifecycleInRTDB,
+      playSound: (level) => soundAlert.playAlert(level),
+    };
+  }
 
   public setGlobalConfig(config: DeviceThresholdsConfig) {
     this.globalConfig = config;
@@ -42,17 +72,10 @@ class AlertEngine {
     this.deviceConfigs.delete(deviceId);
   }
 
-  /**
-   * Obtiene la configuración aplicable a un dispositivo:
-   * Si existe una específica para el dispositivo la utiliza; de lo contrario usa la global.
-   */
   public getConfigForDevice(deviceId: string): DeviceThresholdsConfig {
     return this.deviceConfigs.get(deviceId) || this.globalConfig;
   }
 
-  /**
-   * Evalúa la telemetría recibida de un dispositivo contra los umbrales configurados
-   */
   public processDeviceTelemetry(
     device: SensorDevice,
     customConfig?: DeviceThresholdsConfig
@@ -65,7 +88,6 @@ class AlertEngine {
     const newEvents: AlertEventRecord[] = [];
     const recoveredEvents: AlertEventRecord[] = [];
 
-    // Si el dispositivo está desconectado, no emitir falsas alertas por pines flotantes (ej: 4095 ADC)
     if (device.status === 'desconectado' || device.signalStrength === 'sin_conexion') {
       return {
         highestSeverity: 'normal',
@@ -74,14 +96,25 @@ class AlertEngine {
       };
     }
 
+    const faultSet = new Set(device.faultFields || []);
+
     const variablesToCheck: Array<{
       key: 'pm25' | 'mq2' | 'temperatura' | 'humedad';
+      rawField: 'CO' | 'PM2_5' | 'temperatura' | 'humedad';
       val: number | undefined;
     }> = [
-      { key: 'mq2', val: device.rawCO },
-      { key: 'pm25', val: device.rawPM25 },
-      { key: 'temperatura', val: typeof device.rawTemp === 'number' ? device.rawTemp : device.metrics?.temperatura },
-      { key: 'humedad', val: typeof device.rawHum === 'number' ? device.rawHum : device.metrics?.humedad },
+      { key: 'mq2', rawField: 'CO', val: faultSet.has('CO') ? undefined : device.rawCO },
+      { key: 'pm25', rawField: 'PM2_5', val: faultSet.has('PM2_5') ? undefined : device.rawPM25 },
+      {
+        key: 'temperatura',
+        rawField: 'temperatura',
+        val: faultSet.has('temperatura') ? undefined : device.rawTemp,
+      },
+      {
+        key: 'humedad',
+        rawField: 'humedad',
+        val: faultSet.has('humedad') ? undefined : device.rawHum,
+      },
     ];
 
     let highestSeverity: AlertThresholdLevel = 'normal';
@@ -90,11 +123,10 @@ class AlertEngine {
       const { key, val } = item;
       const varConfig = config[key];
 
-      if (!varConfig || !varConfig.activo || typeof val !== 'number' || isNaN(val)) {
+      if (!varConfig || !varConfig.activo || typeof val !== 'number' || Number.isNaN(val)) {
         continue;
       }
 
-      // Evaluar nivel de umbral
       let currentLevel: AlertThresholdLevel = 'normal';
       let exceededThreshold = 0;
 
@@ -109,7 +141,6 @@ class AlertEngine {
         exceededThreshold = varConfig.preventivo;
       }
 
-      // Actualizar severidad máxima del dispositivo
       if (currentLevel === 'critico') {
         highestSeverity = 'critico';
       } else if (currentLevel === 'advertencia' && highestSeverity !== 'critico') {
@@ -122,14 +153,31 @@ class AlertEngine {
       const existingIncident = this.activeIncidents.get(incidentKey);
 
       if (currentLevel !== 'normal') {
-        // ¿Debe generarse un nuevo evento de alerta?
-        // Solo si: no existía incidente previo O hubo escalamiento de severidad (ej: preventivo -> advertencia -> critico)
         const isNewIncident = !existingIncident;
-        const hasEscalated = existingIncident && this.getSeverityRank(currentLevel) > this.getSeverityRank(existingIncident.severity);
+        const hasEscalated =
+          Boolean(existingIncident) &&
+          this.getSeverityRank(currentLevel) > this.getSeverityRank(existingIncident!.severity);
 
         if (isNewIncident || hasEscalated) {
           const now = Date.now();
           const eventId = `evt_${device.id}_${key}_${now}`;
+
+          // Si hubo escalamiento de severidad, cerrar el incidente previo en RTDB para evitar alertas huérfanas
+          if (hasEscalated && existingIncident) {
+            this.persistenceHandlers
+              .updateEvent(existingIncident.id, {
+                estado: 'recuperada',
+                recuperada_en: now,
+              })
+              .catch(() => {});
+            this.persistenceHandlers
+              .closeAlert(
+                existingIncident.id,
+                `Escalamiento automático a nivel ${currentLevel.toUpperCase()} (${eventId}).`,
+                { clearEmergencyIfNone: false }
+              )
+              .catch(() => {});
+          }
 
           const eventRecord: AlertEventRecord = {
             id: eventId,
@@ -166,22 +214,17 @@ class AlertEngine {
 
           newEvents.push(eventRecord);
 
-          // Si las notificaciones están habilitadas para la variable y es advertencia/crítico, reproducir audio
           if (varConfig.notificaciones && (currentLevel === 'advertencia' || currentLevel === 'critico')) {
-            soundAlert.playAlert(currentLevel === 'critico' ? 'critico' : 'advertencia');
+            this.persistenceHandlers.playSound(currentLevel === 'critico' ? 'critico' : 'advertencia');
           }
 
-          // Guardar de forma asíncrona en Firebase RTDB
-          saveAlertThresholdEvent(eventRecord).catch((err) => {
-            console.warn('Error saving threshold event to Firebase:', err);
+          this.persistenceHandlers.saveEvent(eventRecord).catch((err) => {
+            console.warn('Error saving threshold event:', err);
           });
         } else if (existingIncident) {
-          // Si la condición persiste sin escalar, actualizamos únicamente el último valor detectado
-          // evitando generar spam de cientos de alertas repetidas
           existingIncident.lastValue = val;
         }
       } else {
-        // La condición volvió a la normalidad: mecanismo de recuperación
         if (existingIncident) {
           const now = Date.now();
           const recoveredRecord: AlertEventRecord = {
@@ -205,13 +248,28 @@ class AlertEngine {
           recoveredEvents.push(recoveredRecord);
           this.activeIncidents.delete(incidentKey);
 
-          // Actualizar estado en Firebase RTDB a "recuperada"
-          updateAlertThresholdEvent(existingIncident.id, {
-            estado: 'recuperada',
-            recuperada_en: now
-          }).catch((err) => {
-            console.warn('Error updating recovery state in Firebase:', err);
-          });
+          this.persistenceHandlers
+            .updateEvent(existingIncident.id, {
+              estado: 'recuperada',
+              recuperada_en: now
+            })
+            .catch((err) => {
+              console.warn('Error updating recovery state:', err);
+            });
+
+          const hasOtherCritical = Array.from(this.activeIncidents.values()).some(
+            (inc) => inc.severity === 'critico'
+          );
+
+          this.persistenceHandlers
+            .closeAlert(
+              existingIncident.id,
+              `Auto-recuperación de ${varConfig.label}: valor volvió a ${Number(val.toFixed(1))} ${varConfig.unidad} (< ${varConfig.preventivo} ${varConfig.unidad}).`,
+              { clearEmergencyIfNone: !hasOtherCritical }
+            )
+            .catch((err) => {
+              console.warn('Error closing recovered alert:', err);
+            });
         }
       }
     }
@@ -223,9 +281,6 @@ class AlertEngine {
     };
   }
 
-  /**
-   * Evalúa un lote de dispositivos completos
-   */
   public processAllDevices(devices: SensorDevice[]): {
     newEvents: AlertEventRecord[];
     recoveredEvents: AlertEventRecord[];
@@ -245,17 +300,10 @@ class AlertEngine {
     };
   }
 
-  /**
-   * Resetea el estado de incidentes en memoria (útil en pruebas)
-   */
   public clearActiveIncidents(): void {
     this.activeIncidents.clear();
   }
 
-  /**
-   * Sincroniza incidentes activos existentes en RTDB (/alertas/evt_*) para evitar
-   * duplicar alertas automáticas al recargar la página o abrir otra pestaña.
-   */
   public syncExistingActiveAlerts(existingAlerts: SafetyAlert[]): void {
     const validVars = new Set(['pm25', 'mq2', 'temperatura', 'humedad']);
     existingAlerts.forEach((a) => {
@@ -268,11 +316,17 @@ class AlertEngine {
       const deviceId = parts.slice(1, parts.length - 2).join('_');
       const incidentKey = `${deviceId}:${varKey}`;
       if (!this.activeIncidents.has(incidentKey)) {
+        const mappedSeverity: 'preventivo' | 'advertencia' | 'critico' =
+          a.severity === 'critico'
+            ? 'critico'
+            : a.severity === 'preventivo'
+            ? 'preventivo'
+            : 'advertencia';
         this.activeIncidents.set(incidentKey, {
           id: a.id,
           deviceId,
           variable: varKey,
-          severity: a.severity === 'critico' ? 'critico' : 'advertencia',
+          severity: mappedSeverity,
           thresholdExceeded: 0,
           initialTimestamp: Number(tsStr) || a.timestampMs || Date.now(),
           lastValue: 0,
@@ -281,11 +335,12 @@ class AlertEngine {
     });
   }
 
-  /**
-   * Lista los incidentes activos actualmente
-   */
   public getActiveIncidentsCount(): number {
     return this.activeIncidents.size;
+  }
+
+  public getActiveIncidentsSnapshot(): ActiveIncident[] {
+    return Array.from(this.activeIncidents.values());
   }
 
   private getSeverityRank(sev: 'normal' | 'preventivo' | 'advertencia' | 'critico'): number {

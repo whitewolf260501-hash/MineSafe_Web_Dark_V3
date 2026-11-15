@@ -1,4 +1,35 @@
-export type AlertSeverity = 'normal' | 'advertencia' | 'critico' | 'desconectado';
+export type AlertSeverity = 'normal' | 'preventivo' | 'advertencia' | 'critico' | 'desconectado';
+
+export interface Organization {
+  id: string;
+  name: string;
+  rut?: string;
+  industry?: string;
+  status: 'activa' | 'suspendida';
+  createdAt: number;
+  updatedAt?: number;
+  createdBy?: string;
+}
+
+export interface TelemetryHistoryPoint {
+  timestamp: number;
+  co: number | null;
+  pm25: number | null;
+  temperatura: number | null;
+  humedad: number | null;
+}
+
+export interface AlertAttachment {
+  id: string;
+  alertId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  downloadUrl: string;
+  storagePath: string;
+  uploadedBy: string;
+  createdAt: number;
+}
 
 export interface TelemetryVariable {
   id: string;
@@ -12,6 +43,7 @@ export interface TelemetryVariable {
   thresholdMin?: number;
   thresholdMax?: number;
   lastUpdateSeconds: number;
+  isSimulated?: boolean;
   historical: { timestamp: string; value: number }[];
 }
 
@@ -20,17 +52,20 @@ export interface SensorDevice {
   code: string;
   name: string;
   type: 'multigas_portatil' | 'estacion_fija' | 'flujo_ventilacion' | 'sensor_geomecanico' | 'camara_termica';
+  organizationId?: string;
   sectorId: string;
   sectorName: string;
   batteryPct: number;
   signalStrength: 'optima' | 'media' | 'debil' | 'sin_conexion';
   lastPing: string;
   status: AlertSeverity;
-  assignedTo?: string; // Operator name if assigned
+  assignedTo?: string;
   rawCO?: number;
   rawPM25?: number;
   rawTemp?: number;
   rawHum?: number;
+  sensorFault?: boolean;
+  faultFields?: ('CO' | 'PM2_5' | 'temperatura' | 'humedad')[];
   lastUpdateServer?: number;
   gatewayOnline?: boolean;
   metrics: {
@@ -75,16 +110,18 @@ export interface AlarmAuditRecord {
   resolvedBy?: string;
   sourceKind?: 'esp32' | 'bitacora_web';
   alertTitle?: string;
+  closingTitle?: string;
+  attachments?: AlertAttachment[];
 }
 
 export interface ESP32GatewayData {
   deviceId: string;
   name: string;
-  co: number; // MQ-2 analog / PPM
-  pm25: number; // PM2.5 analog / ug/m3
-  temperature: number; // DHT11 °C
-  humidity: number; // DHT11 %
-  lastUpdateServer: number; // timestamp
+  co: number;
+  pm25: number;
+  temperature: number;
+  humidity: number;
+  lastUpdateServer: number;
   isOnline: boolean;
   secondsAgo: number;
   localIp: string;
@@ -106,6 +143,7 @@ export interface MiningSector {
 
 export interface MiningSite {
   id: string;
+  organizationId?: string;
   name: string;
   company: string;
   location: string;
@@ -117,18 +155,20 @@ export interface MiningSite {
   isPreloaded?: boolean;
 }
 
-export type AlertResolutionType = 
-  | 'emergencia_real' 
-  | 'simulacro' 
-  | 'falsa_alarma_sensor' 
+export type AlertResolutionType =
+  | 'emergencia_real'
+  | 'simulacro'
+  | 'falsa_alarma_sensor'
   | 'prueba_operativa';
 
 export interface AlertResolutionDetails {
   resolutionType: AlertResolutionType;
+  closingTitle?: string;
   comment: string;
   correctiveActions?: string;
   resolvedBy: string;
   resolvedAt: string;
+  attachments?: AlertAttachment[];
 }
 
 export interface DrillDebriefRecord {
@@ -144,6 +184,7 @@ export interface DrillDebriefRecord {
 export interface SafetyAlert {
   id: string;
   code: string;
+  organizationId?: string;
   title: string;
   severity: AlertSeverity;
   variableName: string;
@@ -156,14 +197,15 @@ export interface SafetyAlert {
   timestampMs?: number;
   acknowledged: boolean;
   acknowledgedBy?: string;
+  acknowledgedAt?: number;
   resolved: boolean;
   suggestedAction: string;
   resolutionDetails?: AlertResolutionDetails;
 }
 
-
 export interface DeviceRental {
   id: string;
+  organizationId?: string;
   contractNumber: string;
   deviceCode: string;
   deviceType: string;
@@ -180,10 +222,11 @@ export interface DeviceRental {
 
 export interface WorkerAssignment {
   id: string;
+  organizationId?: string;
   workerRut: string;
   workerName: string;
   role: string;
-  crew: string; // e.g. "Cuadrilla Alfa - Turno A"
+  crew: string;
   sectorName: string;
   assignedDeviceId: string;
   assignedDeviceCode: string;
@@ -196,6 +239,7 @@ export type UserRole = 'superadmin' | 'admin' | 'operador';
 
 export interface UserProfile {
   id: string;
+  organizationId?: string;
   name: string;
   email: string;
   role: UserRole;
@@ -294,6 +338,7 @@ export type DeviceCategory = 'sensor' | 'gateway' | 'gateway_sensor';
 
 export interface RegisteredDeviceConfig {
   id: string;
+  organizationId?: string;
   name: string;
   category: DeviceCategory;
   sectorName: string;
@@ -329,7 +374,7 @@ export interface ThresholdVariableConfig {
 }
 
 export interface DeviceThresholdsConfig {
-  dispositivo_id: string; // 'global' o ID específico (ej: 'device_38A839E81F84')
+  dispositivo_id: string;
   dispositivo_nombre?: string;
   pm25: ThresholdVariableConfig;
   mq2: ThresholdVariableConfig;
@@ -357,4 +402,3 @@ export interface AlertEventRecord {
   recuperada_en?: number;
   origen: 'motor_umbrales';
 }
-

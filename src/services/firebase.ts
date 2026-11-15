@@ -1,18 +1,30 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { 
-  getFirestore, 
-  Firestore 
+import { initializeApp, getApps } from 'firebase/app';
+import {
+  getFirestore,
+  Firestore
 } from 'firebase/firestore';
-import { 
-  getDatabase, 
-  ref, 
-  onValue, 
-  set, 
-  update, 
+import {
+  getDatabase,
+  ref,
+  onValue,
+  set,
+  update,
   get,
-  Database 
+  remove,
+  query,
+  orderByKey,
+  limitToLast,
+  Database
 } from 'firebase/database';
-import { 
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject,
+  FirebaseStorage
+} from 'firebase/storage';
+import {
   getAuth,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -29,16 +41,16 @@ import {
 } from 'firebase/auth';
 
 import firebaseConfig from '../../firebase-applet-config.json';
-import { 
-  SensorDevice, 
-  UserProfile, 
+import {
+  SensorDevice,
+  UserProfile,
   DeviceRental,
   UserRole,
   SafetyAlert,
+  AlertSeverity,
   AlertResolutionDetails,
   DrillDebriefRecord,
   DeviceThresholdsConfig,
-  ThresholdVariableConfig,
   AlertEventRecord,
   AlarmAuditRecord,
   ControllableTab,
@@ -48,7 +60,11 @@ import {
   WindowOverrideValue,
   RegisteredDeviceConfig,
   MiningSite,
-  MiningSector
+  MiningSector,
+  Organization,
+  TelemetryHistoryPoint,
+  AlertAttachment,
+  WorkerAssignment
 } from '../types';
 
 export const USER_RTDB_URL = "https://minefase-fc5f5-default-rtdb.firebaseio.com/";
@@ -64,7 +80,16 @@ const minefaseConfig = {
   measurementId: "G-DP6YY8GJWE"
 };
 
-// Primary Firebase App connected to user's minefase-fc5f5 project (Auth + RTDB)
+export const DEFAULT_ORGANIZATION: Organization = {
+  id: 'org-minesafe-principal',
+  name: 'MineSafe Operaciones Centrales',
+  rut: '76.420.110-K',
+  industry: 'Minería Subterránea & Rajo',
+  status: 'activa',
+  createdAt: 1760000000000,
+};
+
+// Primary Firebase App connected to user's minefase-fc5f5 project (Auth + RTDB + Storage)
 const minefaseApp = getApps().find((a) => a.name === 'minefase-primary')
   || initializeApp(minefaseConfig, 'minefase-primary');
 
@@ -72,9 +97,10 @@ const minefaseApp = getApps().find((a) => a.name === 'minefase-primary')
 const appletApp = getApps().find((a) => a.name === '[DEFAULT]')
   || initializeApp(firebaseConfig);
 
-// Firebase Realtime Database & Auth connected strictly to minefase-fc5f5
+// Firebase Realtime Database, Auth & Storage connected strictly to minefase-fc5f5
 export const rtdb: Database = getDatabase(minefaseApp, USER_RTDB_URL);
 export const auth = getAuth(minefaseApp);
+export const minefaseStorage: FirebaseStorage = getStorage(minefaseApp);
 
 // Firestore instance
 export const db: Firestore = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
@@ -98,23 +124,69 @@ export async function testConnection(): Promise<boolean> {
 // -------------------------------------------------------------
 // Cache of local reception times per device node to safeguard against NTP clock skew
 const lastPacketArrivalMap: Record<string, number> = {};
+const lastPacketSignatureMap: Record<string, string> = {};
 
-export function recordDevicePacketArrival(key: string) {
-  lastPacketArrivalMap[key] = Date.now();
+export function recordDevicePacketArrival(key: string, data?: any) {
+  if (!data) {
+    if (!lastPacketArrivalMap[key]) {
+      lastPacketArrivalMap[key] = Date.now();
+    }
+    return;
+  }
+  const signature = JSON.stringify([
+    data.CO ?? data.co ?? null,
+    data.PM2_5 ?? data.pm25 ?? null,
+    data.temperatura ?? data.temp ?? null,
+    data.humedad ?? data.hum ?? null,
+    data.last_update_server ?? data.timestamp_server ?? null,
+    data.alarma_activa ?? data.alarma ?? null,
+    data.luz ?? null,
+    data.estado_adquisicion ?? null,
+  ]);
+  if (lastPacketSignatureMap[key] !== signature) {
+    lastPacketSignatureMap[key] = signature;
+    lastPacketArrivalMap[key] = Date.now();
+  }
 }
 
-function readNumField(val: any, fallback: number): number {
-  if (typeof val === 'number' && !Number.isNaN(val)) return val;
-  if (typeof val === 'string' && val.trim() !== '' && !Number.isNaN(Number(val))) return Number(val);
-  return fallback;
+function readStrictBoundedNum(
+  primary: unknown,
+  secondary: unknown,
+  minVal: number,
+  maxVal: number
+): number | null {
+  const candidate = primary !== undefined ? primary : secondary;
+  let num: number | null = null;
+  if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+    num = candidate;
+  } else if (typeof candidate === 'string' && candidate.trim() !== '') {
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed)) num = parsed;
+  }
+  if (num === null || num < minVal || num > maxVal) {
+    return null;
+  }
+  return num;
 }
 
-export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevice {
-  const coVal = data?.CO !== undefined ? readNumField(data.CO, 12) : readNumField(data?.co, 12);
-  const pmVal = data?.PM2_5 !== undefined ? readNumField(data.PM2_5, 25) : readNumField(data?.pm25, 25);
-  const tempVal = data?.temperatura !== undefined ? readNumField(data.temperatura, 22.4) : readNumField(data?.temp, 22.4);
-  const humVal = data?.humedad !== undefined ? readNumField(data.humedad, 48) : readNumField(data?.hum, 48);
+export function mapRTDBDeviceToSensorDevice(
+  key: string,
+  data: any,
+  timeoutSeconds: number = 20
+): SensorDevice {
+  const coVal = readStrictBoundedNum(data?.CO, data?.co, 0, 4095);
+  const pmVal = readStrictBoundedNum(data?.PM2_5, data?.pm25, 0, 4095);
+  const tempVal = readStrictBoundedNum(data?.temperatura, data?.temp, -40, 100);
+  const humVal = readStrictBoundedNum(data?.humedad, data?.hum, 0, 100);
 
+  const faultFields: ('CO' | 'PM2_5' | 'temperatura' | 'humedad')[] = [];
+  if (coVal === null) faultFields.push('CO');
+  if (pmVal === null) faultFields.push('PM2_5');
+  if (tempVal === null) faultFields.push('temperatura');
+  if (humVal === null) faultFields.push('humedad');
+  const sensorFault = faultFields.length > 0;
+
+  const effectiveTimeout = Math.max(5, Number(timeoutSeconds) || 20);
   const now = Date.now();
   const lastArrival = lastPacketArrivalMap[key] || 0;
   let serverTime = Number(data?.last_update_server) || Number(data?.timestamp_server) || 0;
@@ -122,33 +194,29 @@ export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevic
   if (serverTime >= 1000000000 && serverTime < 100000000000) {
     serverTime = serverTime * 1000;
   } else if (serverTime > 0 && serverTime < 1000000000) {
-    // El firmware envió millis() de uptime (ej: 141983 ms) en vez de época Unix:
+    // El firmware envió millis() de uptime en vez de época Unix:
     // usar la hora real de llegada del paquete RTDB para evitar fechas de 1970.
     serverTime = lastArrival > 0 ? lastArrival : now;
   }
 
-  // Connection check: under 20 seconds difference or recent WebSocket RTDB packet
   const diffSeconds = serverTime > 0 ? Math.floor(Math.abs(now - serverTime) / 1000) : 999999;
   const arrivalDiff = lastArrival > 0 ? Math.floor((now - lastArrival) / 1000) : 999999;
 
-  const isOnline = diffSeconds <= 20 || arrivalDiff <= 20;
+  const isOnline = diffSeconds <= effectiveTimeout || arrivalDiff <= effectiveTimeout;
 
   const alarmaActiva = Boolean(data?.alarma_activa);
   const origenAlarma = data?.origen_alarma || '';
   const descripcionMonitoreo = data?.descripcion_monitoreo || '';
 
-  // Determine status based on industrial safety thresholds:
-  // If the device is offline (>20s without update), status is 'desconectado'
-  let status: 'normal' | 'advertencia' | 'critico' | 'desconectado' = 'normal';
+  let status: AlertSeverity = 'normal';
   if (!isOnline) {
     status = 'desconectado';
-  } else if (alarmaActiva || coVal >= 500 || pmVal >= 150) {
+  } else if (alarmaActiva || (coVal !== null && coVal >= 500) || (pmVal !== null && pmVal >= 150)) {
     status = 'critico';
-  } else if (coVal >= 350 || pmVal >= 55) {
+  } else if ((coVal !== null && coVal >= 350) || (pmVal !== null && pmVal >= 55)) {
     status = 'advertencia';
   }
 
-  // Friendly sector and name mapping
   let deviceName = data?.name || key;
   let sectorName = data?.sectorName || 'Faena Central';
   let assigned = data?.userEmail ? 'Manuel Crisostomo' : 'Cuadrilla Operativa';
@@ -172,19 +240,22 @@ export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevic
     code: key,
     name: deviceName,
     type: key.startsWith('NODO') ? 'estacion_fija' : 'multigas_portatil',
+    organizationId: data?.organizationId || DEFAULT_ORGANIZATION.id,
     sectorId: `sec-${key}`,
     sectorName: sectorName,
-    batteryPct: key === 'device_38A839E81F84' ? 95 : 88,
-    signalStrength: isOnline ? 'optima' : 'debil',
-    lastPing: serverTime > 0 
+    batteryPct: typeof data?.bateria === 'number' ? data.bateria : (key === 'device_38A839E81F84' ? 95 : 88),
+    signalStrength: isOnline ? 'optima' : 'sin_conexion',
+    lastPing: serverTime > 0
       ? (diffSeconds < 60 ? `hace ${diffSeconds} seg` : `hace ${Math.floor(diffSeconds / 60)} min`)
-      : 'en vivo (RTDB)',
+      : 'sin marca temporal',
     status: status,
     assignedTo: assigned,
-    rawCO: coVal,
-    rawPM25: pmVal,
-    rawTemp: tempVal,
-    rawHum: humVal,
+    rawCO: coVal === null ? undefined : coVal,
+    rawPM25: pmVal === null ? undefined : pmVal,
+    rawTemp: tempVal === null ? undefined : tempVal,
+    rawHum: humVal === null ? undefined : humVal,
+    sensorFault: sensorFault,
+    faultFields: faultFields,
     lastUpdateServer: serverTime,
     gatewayOnline: isOnline,
     alarmaActiva: alarmaActiva,
@@ -198,15 +269,15 @@ export function mapRTDBDeviceToSensorDevice(key: string, data: any): SensorDevic
     parentGatewayId: data?.parentGatewayId || undefined,
     registroAlarmas: data?.registro_alarmas,
     metrics: {
-      temperatura: Number(tempVal.toFixed(1)),
-      humedad: Number(humVal.toFixed(0)),
-      co2: 520,
-      co: Number(coVal.toFixed(1)),
-      ch4: 0.1,
-      o2: 20.9,
-      flujoAire: 1.25,
-      ruido: 74,
-      polvoPM: Number(pmVal.toFixed(0)),
+      temperatura: tempVal === null ? 0 : Number(tempVal.toFixed(1)),
+      humedad: humVal === null ? 0 : Number(humVal.toFixed(0)),
+      co2: typeof data?.CO2 === 'number' ? data.CO2 : 0,
+      co: coVal === null ? 0 : Number(coVal.toFixed(1)),
+      ch4: typeof data?.CH4 === 'number' ? data.CH4 : 0,
+      o2: typeof data?.O2 === 'number' ? data.O2 : 0,
+      flujoAire: typeof data?.flujo_aire === 'number' ? data.flujo_aire : 0,
+      ruido: typeof data?.ruido === 'number' ? data.ruido : 0,
+      polvoPM: pmVal === null ? 0 : Number(pmVal.toFixed(0)),
     },
   };
 }
@@ -289,11 +360,12 @@ export function mapRTDBUserToUserProfile(key: string, data: any): UserProfile {
 
   return {
     id: key,
+    organizationId: data?.organizationId || DEFAULT_ORGANIZATION.id,
     name: data?.nombre || key,
     email: data?.email || `${key.toLowerCase().replace(/[^a-z0-9]/g, '')}@minesafe.cl`,
     role: role,
     roleLabel: roleLabel,
-    rut: data?.codigoId || data?.telefono || '15.932.104-K',
+    rut: data?.codigoId || data?.telefono || 'No registrado',
     shift: data?.cargo || data?.tipoMina || 'Turno Continuo A',
     status: data?.isActive !== false ? 'activo' : 'inactivo',
     lastLogin: 'En línea (Firebase Auth)',
@@ -450,6 +522,7 @@ export async function registerWithFirebaseAuth(
       await set(ref(rtdb, `usuarios/${uid}`), {
         nombre: newUser.name,
         email: newUser.email,
+        organizationId: DEFAULT_ORGANIZATION.id,
         isAdmin: false,
         isSuperUser: false,
         tipoUsuario: 'operador',
@@ -464,6 +537,70 @@ export async function registerWithFirebaseAuth(
 
     return newUser;
   } catch (err: any) {
+    throw mapFirebaseAuthError(err);
+  }
+}
+
+/**
+ * Crea una cuenta real en Firebase Authentication desde la consola Admin/SuperAdmin
+ * utilizando una instancia secundaria aislada para no cerrar ni alterar la sesión actual del administrador,
+ * y envía opcionalmente el correo de restablecimiento/activación de contraseña.
+ */
+export async function createUserAccountByAdmin(params: {
+  name: string;
+  email: string;
+  password: string;
+  role: 'admin' | 'operador';
+  rut: string;
+  shift: string;
+  assignedSector: string;
+  assignedDeviceCode?: string;
+  organizationId?: string;
+  sendResetEmail?: boolean;
+}): Promise<UserProfile> {
+  const cleanEmail = params.email.trim();
+  const cleanName = params.name.trim();
+  if (!cleanName || !cleanEmail || params.password.length < 6) {
+    throw new Error('Nombre, correo válido y contraseña inicial (mínimo 6 caracteres) son obligatorios.');
+  }
+
+  const secondaryApp =
+    getApps().find((a) => a.name === 'admin-provisioner') ||
+    initializeApp(minefaseConfig, 'admin-provisioner');
+  const secondaryAuth = getAuth(secondaryApp);
+
+  try {
+    const credential = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, params.password);
+    await updateProfile(credential.user, { displayName: cleanName }).catch(() => {});
+    const newUid = credential.user.uid;
+    if (params.sendResetEmail) {
+      await sendPasswordResetEmail(secondaryAuth, cleanEmail).catch(() => {});
+    }
+    await signOut(secondaryAuth).catch(() => {});
+
+    const safeRole: UserRole = params.role === 'admin' ? 'admin' : 'operador';
+    const createdProfile: UserProfile = {
+      id: newUid,
+      organizationId: params.organizationId || DEFAULT_ORGANIZATION.id,
+      name: cleanName,
+      email: cleanEmail,
+      role: safeRole,
+      roleLabel:
+        safeRole === 'admin'
+          ? 'Administrador / Prevencionista de Faena'
+          : 'Operador / Minero en Faena',
+      rut: params.rut.trim() || 'No registrado',
+      shift: params.shift.trim() || 'Turno Continuo A',
+      status: 'activo',
+      lastLogin: 'Cuenta creada en Firebase Auth',
+      assignedSector: params.assignedSector || 'Faena Minera Central',
+      assignedDeviceCode: params.assignedDeviceCode || '',
+    };
+
+    await addUserToRTDB(createdProfile);
+    return createdProfile;
+  } catch (err: any) {
+    await signOut(secondaryAuth).catch(() => {});
     throw mapFirebaseAuthError(err);
   }
 }
@@ -560,6 +697,7 @@ export function mapRTDBContractToRental(key: string, data: any): DeviceRental {
 
   return {
     id: key,
+    organizationId: data?.organizationId || DEFAULT_ORGANIZATION.id,
     contractNumber: key,
     deviceCode: data?.deviceId || data?.idDispositivo || 'MS-IOT-REG',
     deviceType: 'Detector MultiGas Certificado DS 132',
@@ -568,7 +706,7 @@ export function mapRTDBContractToRental(key: string, data: any): DeviceRental {
     endDate: data?.fechaFinArriendo || data?.fechaFinContrato || data?.fechaTermino || '2026-12-31',
     monthlyCostClp: typeof data?.monto === 'number' ? data.monto : (typeof data?.monthlyCostClp === 'number' ? data.monthlyCostClp : 185000),
     paymentStatus: paymentStatus,
-    lastPaymentDate: '2025-11-15',
+    lastPaymentDate: data?.fechaUltimoPago || '2025-11-15',
     nextDueDate: data?.fechaFinArriendo || '2026-03-31',
     assignedTechnician: data?.tec || 'Ingeniería y Soporte MineSafe',
     notes: `Contrato sincronizado desde Realtime Database (${estadoGeneral}).`,
@@ -578,26 +716,51 @@ export function mapRTDBContractToRental(key: string, data: any): DeviceRental {
 // -------------------------------------------------------------
 // REALTIME LISTENERS (RTDB)
 // -------------------------------------------------------------
-export function subscribeToRTDBDevices(callback: (devices: SensorDevice[]) => void): () => void {
+export function subscribeToRTDBDevicesRaw(
+  callback: (rawDevices: Record<string, any>) => void
+): () => void {
   const devicesRef = ref(rtdb, 'dispositivos');
-
-  const unsub1 = onValue(devicesRef, (snapshot) => {
+  const unsub = onValue(devicesRef, (snapshot) => {
     if (snapshot.exists()) {
       const incoming = snapshot.val() || {};
-      const combined: SensorDevice[] = [];
       Object.keys(incoming).forEach((key) => {
-        recordDevicePacketArrival(key);
-        combined.push(mapRTDBDeviceToSensorDevice(key, incoming[key]));
+        recordDevicePacketArrival(key, incoming[key]);
       });
-      callback(combined);
+      callback(incoming);
     } else {
-      callback([]);
+      callback({});
     }
+  }, (err) => {
+    console.warn('Error subscribing to RTDB /dispositivos:', err);
   });
+  return unsub;
+}
 
-  return () => {
-    unsub1();
-  };
+export function subscribeToRTDBDevices(
+  callback: (devices: SensorDevice[]) => void,
+  timeoutSeconds: number = 20
+): () => void {
+  return subscribeToRTDBDevicesRaw((incoming) => {
+    const combined: SensorDevice[] = Object.keys(incoming).map((key) =>
+      mapRTDBDeviceToSensorDevice(key, incoming[key], timeoutSeconds)
+    );
+    callback(combined);
+  });
+}
+
+export async function forceRefreshDevicesFromRTDB(
+  timeoutSeconds: number = 20
+): Promise<{ raw: Record<string, any>; devices: SensorDevice[] }> {
+  const snapshot = await get(ref(rtdb, 'dispositivos'));
+  if (!snapshot.exists()) {
+    return { raw: {}, devices: [] };
+  }
+  const incoming = snapshot.val() || {};
+  const devices = Object.keys(incoming).map((key) => {
+    recordDevicePacketArrival(key, incoming[key]);
+    return mapRTDBDeviceToSensorDevice(key, incoming[key], timeoutSeconds);
+  });
+  return { raw: incoming, devices };
 }
 
 export function extractAlarmAuditRecords(devices: SensorDevice[]): AlarmAuditRecord[] {
@@ -664,6 +827,8 @@ export function buildAuditRecordsFromAlerts(alerts: SafetyAlert[]): AlarmAuditRe
         hora,
         origen,
         alertTitle: a.title,
+        closingTitle: a.resolutionDetails?.closingTitle,
+        attachments: a.resolutionDetails?.attachments,
         descripcion:
           a.resolutionDetails?.comment ||
           a.suggestedAction ||
@@ -687,7 +852,10 @@ export function subscribeToRTDBAlarmRecords(callback: (records: AlarmAuditRecord
   const unsub = onValue(devicesRef, (snapshot) => {
     if (snapshot.exists()) {
       const data = snapshot.val() || {};
-      const devList: SensorDevice[] = Object.keys(data).map(k => mapRTDBDeviceToSensorDevice(k, data[k]));
+      const devList: SensorDevice[] = Object.keys(data).map((k) => {
+        recordDevicePacketArrival(k, data[k]);
+        return mapRTDBDeviceToSensorDevice(k, data[k]);
+      });
       const records = extractAlarmAuditRecords(devList);
       callback(records);
     } else {
@@ -911,11 +1079,13 @@ export async function addUserToRTDB(user: UserProfile): Promise<void> {
     await set(userRef, {
       nombre: user.name,
       email: user.email,
+      organizationId: user.organizationId || DEFAULT_ORGANIZATION.id,
       isAdmin: safeRole === 'superadmin' || safeRole === 'admin',
       isSuperUser: safeRole === 'superadmin',
       tipoUsuario: safeRole,
       isActive: user.status === 'activo',
       telefono: user.rut,
+      cargo: user.shift || 'Turno Continuo A',
       geoMina: user.assignedSector || 'Mina Chuquicamata',
       deviceId: user.assignedDeviceCode || '',
       updatedAt: new Date().toISOString(),
@@ -962,6 +1132,7 @@ export async function updateUserInRTDB(
   };
   if (updates.name) rtdbUpdates.nombre = updates.name;
   if (updates.email) rtdbUpdates.email = updates.email;
+  if (updates.organizationId) rtdbUpdates.organizationId = updates.organizationId;
   if (updates.rut) rtdbUpdates.codigoId = updates.rut;
   if (updates.role) {
     rtdbUpdates.tipoUsuario = updates.role;
@@ -1005,6 +1176,10 @@ export async function addRentalContractToRTDB(rental: DeviceRental): Promise<voi
     const contractRef = ref(rtdb, `contratos/${rental.contractNumber}`);
     await set(contractRef, {
       deviceId: rental.deviceCode,
+      organizationId: rental.organizationId || DEFAULT_ORGANIZATION.id,
+      empresa: rental.provider,
+      monto: rental.monthlyCostClp,
+      tec: rental.assignedTechnician,
       estadoGeneral: rental.paymentStatus === 'al_dia' ? 'Activo' : 'Por Vencer',
       fechaInicioArriendo: rental.startDate,
       fechaFinArriendo: rental.endDate,
@@ -1299,6 +1474,7 @@ function buildAlertBasePayload(alert: SafetyAlert, now: number): Record<string, 
   return {
     id: alert.id,
     codigo: alert.code,
+    organizationId: alert.organizationId || DEFAULT_ORGANIZATION.id,
     titulo: alert.title,
     severidad: alert.severity,
     variable: alert.variableName,
@@ -1309,6 +1485,7 @@ function buildAlertBasePayload(alert: SafetyAlert, now: number): Record<string, 
     limite: alert.safeLimit,
     atendida: Boolean(alert.acknowledged),
     ...(alert.acknowledgedBy ? { atendida_por: alert.acknowledgedBy } : {}),
+    ...(alert.acknowledgedAt ? { timestamp_atendida: alert.acknowledgedAt } : {}),
     resuelta: Boolean(alert.resolved),
     accionSugerida: alert.suggestedAction || '',
     creado_en_texto: alert.timestamp || formatAlertTimestamp(alert.timestampMs || now),
@@ -1323,11 +1500,17 @@ export async function broadcastAlertToRTDB(alert: SafetyAlert): Promise<void> {
     const payload = buildAlertBasePayload(alert, now);
     if (alert.resolutionDetails) {
       payload.tipo_resolucion = alert.resolutionDetails.resolutionType;
+      if (alert.resolutionDetails.closingTitle) {
+        payload.titulo_cierre = alert.resolutionDetails.closingTitle;
+      }
       payload.descripcion_cierre = alert.resolutionDetails.comment;
       payload.acciones_correctivas = alert.resolutionDetails.correctiveActions || '';
       payload.resuelto_por = alert.resolutionDetails.resolvedBy;
       payload.resuelto_en = alert.resolutionDetails.resolvedAt;
       payload.timestamp_cierre = now;
+      if (alert.resolutionDetails.attachments?.length) {
+        payload.adjuntos = alert.resolutionDetails.attachments;
+      }
     }
     await set(alertRef, payload);
 
@@ -1401,6 +1584,13 @@ export function subscribeToRTDBAlerts(callback: (alerts: SafetyAlert[]) => void)
         Boolean(data.tipo_resolucion) ||
         Boolean(bit.tipoResolucion);
 
+      const attachmentsRaw = data.adjuntos || bit.adjuntos;
+      const attachments: AlertAttachment[] | undefined = Array.isArray(attachmentsRaw)
+        ? attachmentsRaw
+        : attachmentsRaw && typeof attachmentsRaw === 'object'
+        ? (Object.values(attachmentsRaw) as AlertAttachment[])
+        : undefined;
+
       const tsNum = Math.max(
         typeof data.timestamp_cierre === 'number' ? data.timestamp_cierre : 0,
         typeof bit.timestamp === 'number' ? bit.timestamp : 0,
@@ -1410,6 +1600,7 @@ export function subscribeToRTDBAlerts(callback: (alerts: SafetyAlert[]) => void)
       const mappedAlert: SafetyAlert = {
         id,
         code: data.codigo || id,
+        organizationId: data.organizationId || DEFAULT_ORGANIZATION.id,
         title: data.titulo || (bit.idAlerta ? `Contingencia Registrada (${bit.idAlerta})` : 'Alerta de Seguridad'),
         severity: (data.severidad as SafetyAlert['severity']) || 'advertencia',
         variableName: data.variable || 'Variable Ambiental',
@@ -1422,6 +1613,7 @@ export function subscribeToRTDBAlerts(callback: (alerts: SafetyAlert[]) => void)
         timestampMs: tsNum,
         acknowledged: Boolean(data.atendida || resolved),
         acknowledgedBy: data.atendida_por,
+        acknowledgedAt: typeof data.timestamp_atendida === 'number' ? data.timestamp_atendida : undefined,
         resolved,
         suggestedAction:
           data.accionSugerida ||
@@ -1431,6 +1623,7 @@ export function subscribeToRTDBAlerts(callback: (alerts: SafetyAlert[]) => void)
           ? {
               resolutionDetails: {
                 resolutionType: data.tipo_resolucion || bit.tipoResolucion || 'simulacro',
+                closingTitle: data.titulo_cierre || bit.tituloCierre || undefined,
                 comment,
                 correctiveActions: data.acciones_correctivas || bit.accionesCorrectivas || '',
                 resolvedBy: data.resuelto_por || bit.supervisor || 'Supervisor de Turno',
@@ -1438,6 +1631,7 @@ export function subscribeToRTDBAlerts(callback: (alerts: SafetyAlert[]) => void)
                   data.resuelto_en ||
                   bit.fecha ||
                   formatAlertTimestamp(data.timestamp_cierre || bit.timestamp),
+                attachments,
               },
             }
           : {}),
@@ -1446,12 +1640,8 @@ export function subscribeToRTDBAlerts(callback: (alerts: SafetyAlert[]) => void)
       mapped.push(mappedAlert);
     });
 
-    // Sort newest first by epoch ms
     mapped.sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0));
 
-    // Keep ALL user-generated/simulated/resolved/acknowledged alerts, and deduplicate
-    // unacknowledged active automatic threshold events (evt_<deviceId>_<var>_<ts>) so
-    // multiple browser tabs or reloads don't flood the active list with hundreds of duplicates.
     const seenActiveEvtKeys = new Set<string>();
     const deduped: SafetyAlert[] = [];
 
@@ -1502,7 +1692,9 @@ export function subscribeToRTDBAlerts(callback: (alerts: SafetyAlert[]) => void)
   };
 }
 
-export function subscribeToRTDBDrill(callback: (drillState: { active: boolean; type?: string; nombre?: string }) => void): () => void {
+export function subscribeToRTDBDrill(
+  callback: (drillState: { active: boolean; type?: string; nombre?: string }) => void
+): () => void {
   const simulacroRef = ref(rtdb, 'simulacro');
   return onValue(simulacroRef, (snapshot) => {
     if (snapshot.exists()) {
@@ -1512,14 +1704,14 @@ export function subscribeToRTDBDrill(callback: (drillState: { active: boolean; t
         type: val?.tipo,
         nombre: val?.nombre,
       });
+    } else {
+      callback({ active: false });
     }
   });
 }
 
 /**
  * Registra el cierre y clasificación de una alerta en Firebase RTDB
- * Guarda si fue una emergencia real, simulacro, falla de sensor o prueba operativa,
- * junto con la descripción y medidas adoptadas por el usuario/supervisor.
  */
 export async function resolveAlertInRTDB(
   alertOrId: SafetyAlert | string,
@@ -1532,6 +1724,8 @@ export async function resolveAlertInRTDB(
       ? buildAlertBasePayload(alertOrId, alertOrId.timestampMs || now)
       : {};
 
+  const cleanAttachments = (details.attachments || []).map((a) => ({ ...a }));
+
   const alertRef = ref(rtdb, `alertas/${alertId}`);
   await update(alertRef, {
     ...baseFields,
@@ -1539,26 +1733,64 @@ export async function resolveAlertInRTDB(
     resuelta: true,
     atendida: true,
     tipo_resolucion: details.resolutionType,
+    ...(details.closingTitle ? { titulo_cierre: details.closingTitle } : {}),
     descripcion_cierre: details.comment,
     acciones_correctivas: details.correctiveActions || '',
     resuelto_por: details.resolvedBy,
     resuelto_en: details.resolvedAt,
     timestamp_cierre: now,
+    ...(cleanAttachments.length > 0 ? { adjuntos: cleanAttachments } : {}),
   });
 
-  // Guardar copia histórica en la bitácora de contingencias (no bloquea si reglas antiguas aún no lo incluyen)
   const bitacoraRef = ref(rtdb, `bitacora_contingencias/${alertId}`);
   await set(bitacoraRef, {
+    alertaId: alertId,
     idAlerta: alertId,
+    titulo: details.closingTitle || (typeof alertOrId === 'object' ? alertOrId.title : 'Contingencia Resuelta'),
+    estado: 'resuelta',
     tipoResolucion: details.resolutionType,
+    ...(details.closingTitle ? { tituloCierre: details.closingTitle } : {}),
     descripcion: details.comment,
     accionesCorrectivas: details.correctiveActions || '',
     supervisor: details.resolvedBy,
     fecha: details.resolvedAt,
     timestamp: now,
+    ...(cleanAttachments.length > 0 ? { adjuntos: cleanAttachments } : {}),
   }).catch((err) => {
     console.warn('Warning saving copy to bitacora_contingencias:', err);
   });
+}
+
+export async function closeAlertLifecycleInRTDB(
+  alertId: string,
+  reason: string,
+  options?: { clearEmergencyIfNone?: boolean }
+): Promise<void> {
+  const now = Date.now();
+  const alertRef = ref(rtdb, `alertas/${alertId}`);
+  try {
+    const snap = await get(alertRef).catch(() => null);
+    if (snap && snap.exists()) {
+      await update(alertRef, {
+        resuelta: true,
+        atendida: true,
+        auto_recuperada: true,
+        descripcion_cierre: reason,
+        resuelto_por: 'Motor Automático MineSafe',
+        resuelto_en: formatAlertTimestamp(now),
+        timestamp_cierre: now,
+      });
+    }
+    if (options?.clearEmergencyIfNone) {
+      await update(ref(rtdb, 'emergencia'), {
+        activa: false,
+        recuperado_en: now,
+        timestamp: now,
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.warn('Error closing alert lifecycle in RTDB:', err);
+  }
 }
 
 export async function resolveActiveAlertsInRTDB(
@@ -1796,6 +2028,24 @@ export async function saveThresholdConfig(
     timestamp: Date.now(),
     fecha: new Date().toISOString()
   }).catch((err) => console.warn('Error saving audit log:', err));
+
+  // Si es SuperAdmin y editó 'global', sincronizar también /configuracion_plataforma/metrics
+  if (targetId === 'global' && user.role === 'superadmin') {
+    await update(ref(rtdb, 'configuracion_plataforma/metrics'), {
+      coPreventivo: payload.mq2.preventivo,
+      coAdvertencia: payload.mq2.advertencia,
+      coCritico: payload.mq2.critico,
+      pm25Preventivo: payload.pm25.preventivo,
+      pm25Advertencia: payload.pm25.advertencia,
+      pm25Critico: payload.pm25.critico,
+      tempPreventivo: payload.temperatura.preventivo,
+      tempAdvertencia: payload.temperatura.advertencia,
+      tempCritico: payload.temperatura.critico,
+      humPreventivo: payload.humedad.preventivo,
+      humAdvertencia: payload.humedad.advertencia,
+      humCritico: payload.humedad.critico,
+    }).catch(() => {});
+  }
 }
 
 /**
@@ -2000,6 +2250,7 @@ export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
   registeredDevices: [
     {
       id: 'device_38A839E81F84',
+      organizationId: DEFAULT_ORGANIZATION.id,
       name: 'Nodo Sensor & Gateway Principal (1F84)',
       category: 'gateway_sensor',
       sectorName: 'Mina Chuquicamata - Rampa Principal',
@@ -2337,6 +2588,7 @@ export function normalizeMiningSite(raw: any, fallbackId?: string): MiningSite {
 
   return {
     id: raw?.id || fallbackId || `site-${Date.now()}`,
+    organizationId: raw?.organizationId || DEFAULT_ORGANIZATION.id,
     name: raw?.name || 'Faena Minera',
     company: raw?.company || 'Empresa Minera',
     location: raw?.location || (raw?.comuna && raw?.region ? `${raw.comuna}, ${raw.region}` : 'Chile'),
@@ -2419,6 +2671,283 @@ export function subscribeToRTDBSites(
     }
   );
 }
+
+/**
+ * ============================================================================
+ * ORGANIZACIONES MULTI-EMPRESA (/organizaciones)
+ * ============================================================================
+ */
+export function subscribeToRTDBOrganizations(
+  callback: (orgs: Organization[]) => void
+): () => void {
+  const orgsRef = ref(rtdb, 'organizaciones');
+  return onValue(
+    orgsRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const val = snapshot.val() || {};
+        const list: Organization[] = Object.keys(val).map((k) => ({
+          id: k,
+          name: val[k]?.name || k,
+          rut: val[k]?.rut || '',
+          industry: val[k]?.industry || 'Minería',
+          status: val[k]?.status === 'suspendida' ? 'suspendida' : 'activa',
+          createdAt: typeof val[k]?.createdAt === 'number' ? val[k].createdAt : Date.now(),
+          updatedAt: val[k]?.updatedAt,
+          createdBy: val[k]?.createdBy,
+        }));
+        if (!list.some((o) => o.id === DEFAULT_ORGANIZATION.id)) {
+          list.unshift(DEFAULT_ORGANIZATION);
+        }
+        callback(list);
+      } else {
+        callback([DEFAULT_ORGANIZATION]);
+      }
+    },
+    () => {
+      callback([DEFAULT_ORGANIZATION]);
+    }
+  );
+}
+
+export async function saveOrganizationToRTDB(
+  org: Organization,
+  actingUser: UserProfile
+): Promise<void> {
+  if (actingUser.role !== 'superadmin') {
+    throw new Error('Solo el SuperAdministrador puede crear o editar organizaciones.');
+  }
+  const cleanId = org.id.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+  await set(ref(rtdb, `organizaciones/${cleanId}`), {
+    id: cleanId,
+    name: org.name.trim(),
+    rut: org.rut?.trim() || '',
+    industry: org.industry?.trim() || 'Minería',
+    status: org.status || 'activa',
+    createdAt: org.createdAt || Date.now(),
+    updatedAt: Date.now(),
+    createdBy: actingUser.email || actingUser.name,
+  });
+}
+
+export async function deleteOrganizationFromRTDB(
+  orgId: string,
+  actingUser: UserProfile
+): Promise<void> {
+  if (actingUser.role !== 'superadmin') {
+    throw new Error('Solo el SuperAdministrador puede eliminar organizaciones.');
+  }
+  if (orgId === DEFAULT_ORGANIZATION.id) {
+    throw new Error('No se puede eliminar la organización principal por defecto.');
+  }
+  await remove(ref(rtdb, `organizaciones/${orgId}`));
+}
+
+/**
+ * ============================================================================
+ * ASIGNACIONES DE PERSONAL (/asignaciones)
+ * ============================================================================
+ */
+export function subscribeToRTDBAssignments(
+  callback: (assignments: WorkerAssignment[]) => void
+): () => void {
+  const assignRef = ref(rtdb, 'asignaciones');
+  return onValue(
+    assignRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const val = snapshot.val() || {};
+        const list: WorkerAssignment[] = Object.keys(val).map((k) => ({
+          id: k,
+          organizationId: val[k]?.organizationId || DEFAULT_ORGANIZATION.id,
+          workerRut: val[k]?.workerRut || '',
+          workerName: val[k]?.workerName || 'Operador',
+          role: val[k]?.role || 'Operador Mina',
+          crew: val[k]?.crew || 'Cuadrilla Alfa',
+          sectorName: val[k]?.sectorName || 'Faena Central',
+          assignedDeviceId: val[k]?.assignedDeviceId || '',
+          assignedDeviceCode: val[k]?.assignedDeviceCode || '',
+          assignmentDate: val[k]?.assignmentDate || new Date().toISOString().split('T')[0],
+          deviceBattery: typeof val[k]?.deviceBattery === 'number' ? val[k].deviceBattery : 100,
+          emergencyContact: val[k]?.emergencyContact || '',
+        }));
+        callback(list);
+      } else {
+        callback([]);
+      }
+    },
+    () => callback([])
+  );
+}
+
+export async function saveAssignmentToRTDB(assignment: WorkerAssignment): Promise<void> {
+  const cleanId = assignment.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  await set(ref(rtdb, `asignaciones/${cleanId}`), {
+    ...assignment,
+    id: cleanId,
+    organizationId: assignment.organizationId || DEFAULT_ORGANIZATION.id,
+    updatedAt: Date.now(),
+  });
+}
+
+/**
+ * ============================================================================
+ * HISTORIAL REAL DE TELEMETRÍA (/historial_telemetria/{deviceId}/{timestamp})
+ * ============================================================================
+ */
+const lastTelemetryWriteMap: Record<string, { ts: number; sig: string }> = {};
+
+export async function recordTelemetryHistoryPoint(device: SensorDevice): Promise<void> {
+  if (!device.gatewayOnline || device.status === 'desconectado') return;
+  if (
+    device.rawCO === undefined &&
+    device.rawPM25 === undefined &&
+    device.rawTemp === undefined &&
+    device.rawHum === undefined
+  ) {
+    return;
+  }
+
+  const now = Date.now();
+  const prev = lastTelemetryWriteMap[device.id];
+  const sig = `${device.rawCO ?? 'x'}|${device.rawPM25 ?? 'x'}|${device.rawTemp ?? 'x'}|${device.rawHum ?? 'x'}`;
+
+  // Throttling: mínimo 5 segundos entre puntos; si no cambiaron los valores, guardar latido cada 30s
+  if (prev) {
+    const elapsed = now - prev.ts;
+    if (elapsed < 5000) return;
+    if (prev.sig === sig && elapsed < 30000) return;
+  }
+
+  lastTelemetryWriteMap[device.id] = { ts: now, sig };
+  const sample: TelemetryHistoryPoint = {
+    timestamp: now,
+    co: device.rawCO ?? null,
+    pm25: device.rawPM25 ?? null,
+    temperatura: device.rawTemp ?? null,
+    humedad: device.rawHum ?? null,
+  };
+
+  try {
+    await set(ref(rtdb, `historial_telemetria/${device.id}/${now}`), sample);
+  } catch (err) {
+    console.warn('Error persisting telemetry history sample:', err);
+  }
+}
+
+export function subscribeToTelemetryHistory(
+  deviceId: string,
+  rangeHours: number,
+  callback: (points: TelemetryHistoryPoint[]) => void
+): () => void {
+  if (!deviceId) {
+    callback([]);
+    return () => {};
+  }
+  const histQuery = query(
+    ref(rtdb, `historial_telemetria/${deviceId}`),
+    orderByKey(),
+    limitToLast(600)
+  );
+  return onValue(
+    histQuery,
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        callback([]);
+        return;
+      }
+      const cutoff = Date.now() - rangeHours * 3600 * 1000;
+      const raw = snapshot.val() || {};
+      const points: TelemetryHistoryPoint[] = Object.keys(raw)
+        .map((k) => {
+          const item = raw[k];
+          const ts = typeof item?.timestamp === 'number' ? item.timestamp : Number(k);
+          return {
+            timestamp: ts,
+            co: typeof item?.co === 'number' ? item.co : null,
+            pm25: typeof item?.pm25 === 'number' ? item.pm25 : null,
+            temperatura: typeof item?.temperatura === 'number' ? item.temperatura : null,
+            humedad: typeof item?.humedad === 'number' ? item.humedad : null,
+          };
+        })
+        .filter((p) => Number.isFinite(p.timestamp) && p.timestamp >= cutoff)
+        .sort((a, b) => a.timestamp - b.timestamp);
+      callback(points);
+    },
+    (err) => {
+      console.warn('Error subscribing to telemetry history:', err);
+      callback([]);
+    }
+  );
+}
+
+/**
+ * ============================================================================
+ * ADJUNTOS DE EVIDENCIA EN FIREBASE STORAGE (/adjuntos)
+ * ============================================================================
+ */
+const ALLOWED_ATTACHMENT_MIME = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+]);
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5 MB
+
+export async function uploadAlertAttachmentToStorage(
+  alertId: string,
+  file: File,
+  uploadedBy: string
+): Promise<AlertAttachment> {
+  if (!ALLOWED_ATTACHMENT_MIME.has(file.type)) {
+    throw new Error('Formato no permitido. Solo se aceptan imágenes JPG, PNG, WEBP o documentos PDF.');
+  }
+  if (file.size <= 0 || file.size > MAX_ATTACHMENT_BYTES) {
+    throw new Error('El archivo supera el límite máximo permitido de 5 MB.');
+  }
+
+  const safeAlertId = alertId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
+  const attId = `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const storagePath = `adjuntos/${safeAlertId}/${attId}_${safeName}`;
+  const fileRef = storageRef(minefaseStorage, storagePath);
+
+  try {
+    await uploadBytes(fileRef, file, { contentType: file.type });
+    const downloadUrl = await getDownloadURL(fileRef);
+
+    const attachment: AlertAttachment = {
+      id: attId,
+      alertId: safeAlertId,
+      fileName: file.name,
+      contentType: file.type,
+      sizeBytes: file.size,
+      downloadUrl,
+      storagePath,
+      uploadedBy,
+      createdAt: Date.now(),
+    };
+
+    await set(ref(rtdb, `adjuntos/${attId}`), attachment).catch(() => {});
+    return attachment;
+  } catch (err: any) {
+    const code = err?.code || '';
+    if (code === 'storage/unauthorized' || String(err?.message || '').includes('permission')) {
+      throw new Error(
+        'Firebase Storage rechazó la subida de evidencia (storage/unauthorized). Configura las reglas de Storage para usuarios autenticados en minefase-fc5f5.'
+      );
+    }
+    throw new Error(err?.message || 'No se pudo subir el archivo de evidencia a Firebase Storage.');
+  }
+}
+
+export async function deleteAlertAttachment(attachment: AlertAttachment): Promise<void> {
+  if (attachment.storagePath) {
+    await deleteObject(storageRef(minefaseStorage, attachment.storagePath)).catch(() => {});
+  }
+  await remove(ref(rtdb, `adjuntos/${attachment.id}`)).catch(() => {});
+}
+
 
 
 

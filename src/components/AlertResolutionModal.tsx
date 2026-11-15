@@ -1,17 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  ShieldCheck, 
-  AlertTriangle, 
-  Flame, 
-  Cpu, 
-  Wrench, 
-  X, 
-  CheckCircle2, 
-  FileText,
+import {
+  ShieldCheck,
+  AlertTriangle,
+  Flame,
+  Cpu,
+  Wrench,
+  X,
+  CheckCircle2,
   UserCheck,
-  Clock
+  Clock,
+  Paperclip,
+  Trash2,
+  ExternalLink,
 } from 'lucide-react';
-import { SafetyAlert, AlertResolutionType, AlertResolutionDetails, UserProfile } from '../types';
+import {
+  SafetyAlert,
+  AlertResolutionType,
+  AlertResolutionDetails,
+  UserProfile,
+  AlertAttachment,
+} from '../types';
+import { uploadAlertAttachmentToStorage, deleteAlertAttachment } from '../services/firebase';
 
 interface AlertResolutionModalProps {
   alert: SafetyAlert | null;
@@ -29,29 +38,69 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
   const [resolutionType, setResolutionType] = useState<AlertResolutionType>(
     alert?.resolutionDetails?.resolutionType || 'simulacro'
   );
+  const [closingTitle, setClosingTitle] = useState(
+    alert?.resolutionDetails?.closingTitle || ''
+  );
   const [comment, setComment] = useState(alert?.resolutionDetails?.comment || '');
   const [correctiveActions, setCorrectiveActions] = useState(
     alert?.resolutionDetails?.correctiveActions || ''
   );
   const [supervisorName, setSupervisorName] = useState(
-    alert?.resolutionDetails?.resolvedBy || currentUser?.name || 'Manuel Crisostomo'
+    alert?.resolutionDetails?.resolvedBy || currentUser?.name || 'Operador de Turno'
   );
+  const [attachments, setAttachments] = useState<AlertAttachment[]>(
+    alert?.resolutionDetails?.attachments || []
+  );
+  const [isUploading, setIsUploading] = useState(false);
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (!alert) return;
     setResolutionType(alert.resolutionDetails?.resolutionType || 'simulacro');
+    setClosingTitle(alert.resolutionDetails?.closingTitle || '');
     setComment(alert.resolutionDetails?.comment || '');
     setCorrectiveActions(alert.resolutionDetails?.correctiveActions || '');
     setSupervisorName(
-      alert.resolutionDetails?.resolvedBy || currentUser?.name || 'Manuel Crisostomo'
+      alert.resolutionDetails?.resolvedBy || currentUser?.name || 'Operador de Turno'
     );
+    setAttachments(alert.resolutionDetails?.attachments || []);
     setErrorNotice(null);
     setIsSaving(false);
+    setIsUploading(false);
   }, [alert, currentUser]);
 
   if (!alert) return null;
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    try {
+      setIsUploading(true);
+      setErrorNotice(null);
+      const uploaded = await uploadAlertAttachmentToStorage(
+        alert.id,
+        file,
+        supervisorName.trim() || currentUser?.name || 'Operador'
+      );
+      setAttachments((prev) => [...prev, uploaded]);
+    } catch (err: any) {
+      setErrorNotice(err?.message || 'No se pudo adjuntar la evidencia en Firebase Storage.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleRemoveAttachment = async (att: AlertAttachment) => {
+    try {
+      await deleteAlertAttachment(att);
+      setAttachments((prev) => prev.filter((item) => item.id !== att.id));
+    } catch {
+      setAttachments((prev) => prev.filter((item) => item.id !== att.id));
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,6 +111,7 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
 
     const details: AlertResolutionDetails = {
       resolutionType,
+      closingTitle: closingTitle.trim() || undefined,
       comment: comment.trim(),
       correctiveActions:
         correctiveActions.trim() || 'Verificación visual y restablecimiento de condición basal normal.',
@@ -73,6 +123,7 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
         hour: '2-digit',
         minute: '2-digit',
       }),
+      attachments: attachments.length > 0 ? attachments : undefined,
     };
 
     try {
@@ -134,8 +185,6 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-md p-3 sm:p-6 animate-in fade-in flex items-center justify-center">
       <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full shadow-2xl shadow-black/70 flex flex-col max-h-[92vh] overflow-hidden">
-        
-        {/* HEADER */}
         <div className="flex items-center justify-between p-5 pb-4 border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-cyan-950 text-cyan-400 border border-cyan-800 flex items-center justify-center shrink-0">
@@ -162,10 +211,7 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
           </button>
         </div>
 
-        {/* SCROLLABLE FORM BODY */}
         <form onSubmit={handleSubmit} className="p-5 sm:p-6 overflow-y-auto space-y-4">
-          
-          {/* CONTEXTO DE LA ALERTA */}
           <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800 text-xs space-y-1.5">
             <div className="flex items-center justify-between text-slate-400 text-[11px]">
               <span>ID: <strong className="text-white font-mono">{alert.code}</strong></span>
@@ -183,7 +229,6 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
             </div>
           </div>
 
-          {/* CLASIFICACIÓN DEL EVENTO */}
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase tracking-wider text-slate-300 block">
               1. Clasificación del Evento (¿Fue verdadera, simulacro o falla?):
@@ -209,7 +254,19 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
             </div>
           </div>
 
-          {/* CUADRO DE TEXTO 1: DESCRIPCIÓN DE LO OCURRIDO */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-300 block">
+              Título / Resumen de Cierre (Opcional):
+            </label>
+            <input
+              type="text"
+              value={closingTitle}
+              onChange={(e) => setClosingTitle(e.target.value)}
+              placeholder="Ej: Falsa alarma por polvo en suspensión tras tronadura controlada"
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
+            />
+          </div>
+
           <div className="space-y-1.5">
             <label className="text-xs font-bold uppercase tracking-wider text-slate-300 block">
               2. Descripción del Suceso y Hallazgos en Faena: <span className="text-rose-400">*</span>
@@ -223,7 +280,7 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
               rows={3}
               placeholder={
                 resolutionType === 'emergencia_real'
-                  ? 'Describa la magnitud de la fuga/incendio, cuadrillas evacuadas, concentración de gases medida...'
+                  ? 'Describa la magnitud de la fuga/incendio, cuadrillas evacuadas, concentración medida...'
                   : resolutionType === 'simulacro'
                   ? 'Describa el objetivo del simulacro, tiempos de evacuación registrados y comportamiento de cuadrillas...'
                   : resolutionType === 'falsa_alarma_sensor'
@@ -234,7 +291,6 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
             />
           </div>
 
-          {/* CUADRO DE TEXTO 2: MEDIDAS ADOPTADAS Y PROTOCOLO */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold uppercase tracking-wider text-slate-300 block">
               3. Medidas Adoptadas y Acciones Correctivas (Opcional):
@@ -243,12 +299,60 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
               type="text"
               value={correctiveActions}
               onChange={(e) => setCorrectiveActions(e.target.value)}
-              placeholder="Ej: Se forzó ventilación por 20 min, verificación con detector multigas Dräger, sensor sustituido."
+              placeholder="Ej: Se forzó ventilación por 20 min, verificación con detector calibrado, sensor sustituido."
               className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
             />
           </div>
 
-          {/* FIRMA Y SUPERVISOR */}
+          {/* Adjuntos de Evidencia (Firebase Storage) */}
+          <div className="space-y-2 p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Paperclip className="w-3.5 h-3.5 text-cyan-400" />
+                Evidencia Adjunta (JPG, PNG, WEBP o PDF · máx. 5 MB)
+              </label>
+              <label className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-[11px] font-semibold cursor-pointer">
+                {isUploading ? 'Subiendo...' : 'Adjuntar Archivo'}
+                <input
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp,.pdf"
+                  onChange={handleFileChange}
+                  disabled={isUploading}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {attachments.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                {attachments.map((att) => (
+                  <div
+                    key={att.id}
+                    className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px]"
+                  >
+                    <a
+                      href={att.downloadUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-1.5 text-cyan-300 hover:underline truncate"
+                    >
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                      <span className="truncate">{att.fileName}</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttachment(att)}
+                      className="text-rose-400 hover:text-rose-300 p-0.5 shrink-0"
+                      title="Eliminar adjunto"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
             <div>
               <label className="text-[11px] font-semibold text-slate-400 block mb-1">
@@ -276,7 +380,6 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
             </div>
           </div>
 
-          {/* MENSAJE DE VALIDACIÓN */}
           {errorNotice && (
             <div className="p-2.5 rounded-lg bg-rose-950/80 border border-rose-800 text-rose-300 text-xs flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
@@ -284,29 +387,27 @@ export const AlertResolutionModal: React.FC<AlertResolutionModalProps> = ({
             </div>
           )}
 
-          {/* FOOTER ACTIONS */}
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
             <button
               type="button"
               onClick={onClose}
-              disabled={isSaving}
+              disabled={isSaving || isUploading}
               className="px-4 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded-xl transition-colors"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              disabled={isSaving}
+              disabled={isSaving || isUploading}
               className="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-xl shadow-lg shadow-emerald-950 transition-all flex items-center gap-2"
             >
               <CheckCircle2 className="w-4 h-4" />
               {isSaving ? 'Guardando en Firebase...' : 'Guardar Bitácora y Dar por Resuelta'}
             </button>
           </div>
-
         </form>
-
       </div>
     </div>
   );
 };
+
