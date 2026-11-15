@@ -19,7 +19,9 @@ import {
   ShieldAlert,
   Fingerprint,
   Loader2,
-  ExternalLink
+  ExternalLink,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { 
@@ -38,6 +40,8 @@ interface LoginModalProps {
   usersList: UserProfile[];
   onRegisterUser: (newUser: UserProfile) => void;
   isGateMode?: boolean;
+  theme?: 'dark' | 'light';
+  onToggleTheme?: () => void;
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({
@@ -48,6 +52,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   usersList,
   onRegisterUser,
   isGateMode = false,
+  theme = 'dark',
+  onToggleTheme,
 }) => {
   const [activeTab, setActiveTab] = useState<'login' | 'register' | 'recover'>('login');
   const [email, setEmail] = useState('');
@@ -218,16 +224,41 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </div>
         </div>
 
-        {/* Close button only in modal mode */}
-        {!isGateMode && (
-          <button 
-            onClick={onClose} 
-            aria-label="Cerrar modal"
-            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors shrink-0 -mr-1 -mt-1"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
+        {/* Header actions: Theme toggle + Close button */}
+        <div className="flex items-center gap-1.5 shrink-0 -mr-1 -mt-1">
+          {onToggleTheme && (
+            <button
+              type="button"
+              onClick={() => {
+                onToggleTheme();
+                soundAlert.playFeedbackBeep();
+              }}
+              title={theme === 'dark' ? 'Cambiar a Versión Clara' : 'Cambiar a Versión Oscura'}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:bg-slate-800 text-[11px] font-semibold text-slate-200 transition-colors"
+            >
+              {theme === 'dark' ? (
+                <>
+                  <Sun className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Claro</span>
+                </>
+              ) : (
+                <>
+                  <Moon className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Oscuro</span>
+                </>
+              )}
+            </button>
+          )}
+          {!isGateMode && (
+            <button 
+              onClick={onClose} 
+              aria-label="Cerrar modal"
+              className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Scrollable Body Container */}

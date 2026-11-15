@@ -139,6 +139,35 @@ export default function App() {
   const [drillType, setDrillType] = useState<DrillType | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
   const [alarmFeedback, setAlarmFeedback] = useState<{ message: string; tone: 'error' | 'success' } | null>(null);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      return localStorage.getItem('minesafe_theme') === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('minesafe_theme', theme);
+    } catch { /* ignore */ }
+    const root = document.documentElement;
+    if (theme === 'light') {
+      root.classList.add('theme-light');
+      root.setAttribute('data-theme', 'light');
+    } else {
+      root.classList.remove('theme-light');
+      root.setAttribute('data-theme', 'dark');
+    }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      meta.setAttribute('content', theme === 'light' ? '#f1f5f9' : '#060b13');
+    }
+  }, [theme]);
+
+  const handleToggleTheme = useCallback(() => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  }, []);
 
   const showAlarmFeedback = useCallback((message: string, tone: 'error' | 'success') => {
     setAlarmFeedback({ message, tone });
@@ -1156,6 +1185,8 @@ export default function App() {
         onClose={() => {}}
         usersList={usersList}
         onRegisterUser={handleAddUser}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
       />
     );
   }
@@ -1183,6 +1214,8 @@ export default function App() {
         onToggleLight={handleToggleLight}
         isDrillActive={isDrillActive}
         platformConfig={platformConfig}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
       />
 
       {/* Feedback de Control de Alarma (Solo SuperAdmin puede apagarla) */}
@@ -1468,6 +1501,8 @@ export default function App() {
           onClose={() => setShowLoginModal(false)}
           usersList={usersList}
           onRegisterUser={handleAddUser}
+          theme={theme}
+          onToggleTheme={handleToggleTheme}
         />
       )}
 

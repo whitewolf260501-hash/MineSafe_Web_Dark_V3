@@ -25,7 +25,9 @@ import {
   BellOff,
   RotateCcw,
   Sliders,
-  Lock
+  Lock,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { NavigationTab, PlatformConfig, UserProfile } from '../types';
 import { soundAlert } from '../services/audioAlert';
@@ -50,6 +52,8 @@ interface NavbarProps {
   onToggleLight?: () => void;
   isDrillActive?: boolean;
   platformConfig?: PlatformConfig;
+  theme?: 'dark' | 'light';
+  onToggleTheme?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -71,6 +75,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleLight,
   isDrillActive = false,
   platformConfig,
+  theme = 'dark',
+  onToggleTheme,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(soundAlert.getMutedState());
@@ -295,6 +301,31 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
 
+            {/* Light / Dark Theme Toggle */}
+            {onToggleTheme && (
+              <button
+                type="button"
+                onClick={() => {
+                  onToggleTheme();
+                  soundAlert.playFeedbackBeep();
+                }}
+                title={theme === 'dark' ? 'Cambiar a Versión Clara' : 'Cambiar a Versión Oscura'}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-900/90 hover:bg-slate-800 text-xs font-semibold text-slate-200 transition-colors shrink-0"
+              >
+                {theme === 'dark' ? (
+                  <>
+                    <Sun className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-[11px]">Claro</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-3.5 h-3.5 text-cyan-400" />
+                    <span className="text-[11px]">Oscuro</span>
+                  </>
+                )}
+              </button>
+            )}
+
             {/* Divider */}
             <div className="h-5 w-px bg-slate-800" />
 
@@ -351,7 +382,20 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Mobile menu trigger button */}
-          <div className="flex md:hidden items-center gap-2">
+          <div className="flex md:hidden items-center gap-1.5">
+            {onToggleTheme && (
+              <button
+                type="button"
+                onClick={() => {
+                  onToggleTheme();
+                  soundAlert.playFeedbackBeep();
+                }}
+                title={theme === 'dark' ? 'Cambiar a Versión Clara' : 'Cambiar a Versión Oscura'}
+                className="p-2 text-slate-400 hover:text-white"
+              >
+                {theme === 'dark' ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-cyan-400" />}
+              </button>
+            )}
             <button
               onClick={handleToggleSound}
               className="p-2 text-slate-400 hover:text-white"
