@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test:alerts": "tsx tests/test_alert_engine.ts"
+    "test:alerts": "tsx tests/test_alert_engine.ts",
+    "test:p013": "tsx tests/test_p013_access_and_landing.ts",
+    "test": "npm run test:alerts && npm run test:p013"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

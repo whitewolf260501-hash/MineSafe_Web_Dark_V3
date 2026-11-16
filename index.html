@@ -20,18 +20,27 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     
-    <!-- Aplicar tema claro/oscuro guardado antes del primer render -->
+    <!-- Aplicar tema claro/oscuro guardado antes del primer render solo en /panel -->
     <script>
       (function() {
         try {
-          var savedTheme = localStorage.getItem('minesafe_theme');
-          if (savedTheme === 'light') {
-            document.documentElement.classList.add('theme-light');
-            document.documentElement.setAttribute('data-theme', 'light');
-            var meta = document.querySelector('meta[name="theme-color"]');
-            if (meta) meta.setAttribute('content', '#f1f5f9');
+          var p = (window.location.pathname || '').toLowerCase();
+          var h = (window.location.hash || '').toLowerCase();
+          var isPanelRoute = p.endsWith('/panel') || p.endsWith('/panel/') || h === '#/panel' || h === '#panel';
+          if (isPanelRoute) {
+            var savedTheme = localStorage.getItem('minesafe_theme');
+            if (savedTheme === 'light') {
+              document.documentElement.classList.add('theme-light');
+              document.documentElement.setAttribute('data-theme', 'light');
+              var meta = document.querySelector('meta[name="theme-color"]');
+              if (meta) meta.setAttribute('content', '#f1f5f9');
+            } else {
+              document.documentElement.setAttribute('data-theme', 'dark');
+            }
           } else {
-            document.documentElement.setAttribute('data-theme', 'dark');
+            document.documentElement.setAttribute('data-theme', 'public');
+            var pubMeta = document.querySelector('meta[name="theme-color"]');
+            if (pubMeta) pubMeta.setAttribute('content', '#131E31');
           }
         } catch (e) {}
       })();
@@ -63,7 +72,7 @@
         <div class="ms-boot-title" style="font-size:20px;font-weight:800;letter-spacing:-0.025em;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
           <span style="color:#06b6d4;">⛏️</span> MineSafe IoT
         </div>
-        <div style="font-size:13px;color:#64748b;font-family:'JetBrains Mono',monospace;">Iniciando plataforma de monitoreo y telemetría...</div>
+        <div style="font-size:13px;color:#64748b;font-family:'JetBrains Mono',monospace;">Cargando plataforma MineSafe...</div>
         <style>@keyframes ms-spin{to{transform:rotate(360deg)}}</style>
       </div>
     </div>

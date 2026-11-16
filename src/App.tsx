@@ -38,9 +38,15 @@ import {
   MINING_SITES, 
   INITIAL_ALERTS, 
   INITIAL_RENTALS, 
-  INITIAL_ASSIGNMENTS, 
-  PRELOADED_USERS 
+  INITIAL_ASSIGNMENTS
 } from './data/mockData';
+
+import {
+  canModifyTargetUser,
+  canProvisionUserInOrganization,
+  filterScopedUsers,
+  DEFAULT_ORGANIZATION_ID,
+} from './utils/accessControl';
 
 import { 
   testConnection, 
@@ -76,8 +82,6 @@ import {
   DEFAULT_PLATFORM_CONFIG,
   subscribeToPlatformConfig,
   isTabVisibleForUser,
-  subscribeToFirebaseAuth,
-  logoutFromFirebaseAuth,
   verifySuperAdminPrivileges,
   loadCachedSites,
   mergeMiningSites,
@@ -117,7 +121,21 @@ const INITIAL_SINGLE_DEVICE: SensorDevice = {
   },
 };
 
-export default function App() {
+export interface MineSafePanelProps {
+  authenticatedUser: UserProfile;
+  onSessionUserUpdated?: (user: UserProfile) => void;
+  onLogoutRequest: () => Promise<void>;
+  theme: 'dark' | 'light';
+  onToggleTheme: () => void;
+}
+
+export default function App({
+  authenticatedUser,
+  onSessionUserUpdated,
+  onLogoutRequest,
+  theme,
+  onToggleTheme,
+}: MineSafePanelProps) {
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
   const [variables, setVariables] = useState<TelemetryVariable[]>(INITIAL_VARIABLES);
   const [devices, setDevices] = useState<SensorDevice[]>([INITIAL_SINGLE_DEVICE]);
@@ -139,9 +157,8 @@ export default function App() {
     const initial = mergeMiningSites(MINING_SITES, loadCachedSites());
     return initial[0] || MINING_SITES[0];
   });
-  const [usersList, setUsersList] = useState<UserProfile[]>(PRELOADED_USERS);
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
+  const [usersList, setUsersList] = useState<UserProfile[]>([]);
+  const [currentUser, setCurrentUser] = useState<UserProfile>(authenticatedUser);
 
   const [selectedSensorId, setSelectedSensorId] = useState<string | null>(null);
   const [activeTelemetryDeviceId, setActiveTelemetryDeviceId] = useState<string>('device_38A839E81F84');
@@ -157,53 +174,18 @@ export default function App() {
   const [drillType, setDrillType] = useState<DrillType | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
   const [alarmFeedback, setAlarmFeedback] = useState<{ message: string; tone: 'error' | 'success' } | null>(null);
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    try {
-      return localStorage.getItem('minesafe_theme') === 'light' ? 'light' : 'dark';
-    } catch {
-      return 'dark';
-    }
-  });
 
   useEffect(() => {
-    try {
-      localStorage.setItem('minesafe_theme', theme);
-    } catch { /* ignore */ }
-    const root = document.documentElement;
-    if (theme === 'light') {
-      root.classList.add('theme-light');
-      root.setAttribute('data-theme', 'light');
-    } else {
-      root.classList.remove('theme-light');
-      root.setAttribute('data-theme', 'dark');
-    }
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) {
-      meta.setAttribute('content', theme === 'light' ? '#f1f5f9' : '#060b13');
-    }
-  }, [theme]);
+    setCurrentUser(authenticatedUser);
+  }, [authenticatedUser]);
 
-  const handleToggleTheme = useCallback(() => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
-  }, []);
+  const handleToggleTheme = onToggleTheme;
 
   const showAlarmFeedback = useCallback((message: string, tone: 'error' | 'success') => {
     setAlarmFeedback({ message, tone });
     setTimeout(() => {
       setAlarmFeedback((prev) => (prev?.message === message ? null : prev));
     }, 5000);
-  }, []);
-
-  // Strict Firebase Authentication session listener (never trust localStorage alone)
-  useEffect(() => {
-    try {
-      localStorage.removeItem('minesafe_active_user');
-    } catch { /* ignore */ }
-    const unsubAuth = subscribeToFirebaseAuth((authenticatedUser) => {
-      setCurrentUser(authenticatedUser);
-      setIsAuthChecking(false);
-    });
-    return () => unsubAuth();
   }, []);
 
   // Keep timeout ref synchronized with SuperAdmin platform metrics
@@ -277,14 +259,20 @@ export default function App() {
         }
       });
 
-      // Realtime listener for Users (syncs role/status updates for already-authenticated Firebase Auth user)
+      // Realtime listener for Users (syncs role/status updates and revokes access immediately if deactivated)
       unsubUsers = subscribeToRTDBUsers((remoteUsers) => {
         if (remoteUsers && remoteUsers.length > 0) {
           setUsersList(remoteUsers);
           setCurrentUser((prev) => {
-            if (!prev) return null;
-            const updated = remoteUsers.find(u => u.id === prev.id || u.email.toLowerCase() === prev.email.toLowerCase());
-            return updated || prev;
+            const updated = remoteUsers.find(
+              (u) => u.id === prev.id || u.email.toLowerCase() === prev.email.toLowerCase()
+            );
+            if (!updated) return prev;
+            if (updated.status === 'inactivo') {
+              onLogoutRequest().catch(() => {});
+              return prev;
+            }
+            return updated;
           });
         }
       });
@@ -375,8 +363,12 @@ export default function App() {
       if (unsubAlertEvents) unsubAlertEvents();
       if (unsubOrgs) unsubOrgs();
       if (unsubAssignments) unsubAssignments();
+      soundAlert.stopContinuousAlarm();
+      rawDevicesRef.current = {};
+      alertsRef.current = [];
+      alertEngine.syncExistingActiveAlerts([]);
     };
-  }, []);
+  }, [onLogoutRequest]);
 
   // Multi-organization scoping: SuperAdmin can switch orgs or inspect all ('all'); Admin/Operador see their own org
   const effectiveOrgId =
@@ -1158,10 +1150,22 @@ export default function App() {
 
   // User Management Handlers
   const handleAddUser = useCallback((newUser: UserProfile) => {
-    // Regla: Solo existe un único SuperAdmin en toda la plataforma
+    // Regla: Solo existe un único SuperAdmin en toda la plataforma y respeta el ámbito de organización
     const safeRole: UserRole = newUser.role === 'superadmin' ? 'admin' : newUser.role;
+    const targetOrgId =
+      currentUser.role === 'admin'
+        ? currentUser.organizationId || DEFAULT_ORGANIZATION_ID
+        : newUser.organizationId || DEFAULT_ORGANIZATION.id;
+
+    const provisionCheck = canProvisionUserInOrganization(currentUser, targetOrgId, safeRole);
+    if (!provisionCheck.allowed) {
+      showAlarmFeedback(provisionCheck.reason || 'Permisos insuficientes para crear usuario.', 'error');
+      return;
+    }
+
     const safeUser: UserProfile = {
       ...newUser,
+      organizationId: targetOrgId,
       role: safeRole,
       roleLabel:
         safeRole === 'admin'
@@ -1169,26 +1173,16 @@ export default function App() {
           : 'Usuario Normal / Operador de Faena',
     };
     setUsersList((prev) => [safeUser, ...prev]);
-    addUserToRTDB(safeUser);
-  }, []);
+    addUserToRTDB(safeUser, currentUser);
+  }, [currentUser, showAlarmFeedback]);
 
   const handleUpdateUserRole = useCallback((userId: string, newRole: UserRole) => {
-    if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-      return;
-    }
-
     const targetUser = usersList.find((u) => u.id === userId);
     if (!targetUser) return;
 
-    // Regla 1: Ningún Admin (ni otro usuario) puede quitarle permisos o cambiar el rol del SuperAdmin
-    if (targetUser.role === 'superadmin') {
-      console.warn('Acción bloqueada: No se pueden revocar ni modificar los permisos del único SuperAdministrador.');
-      return;
-    }
-
-    // Regla 2: Solo puede existir un único SuperAdmin en toda la plataforma
-    if (newRole === 'superadmin') {
-      console.warn('Acción bloqueada: Solo existe un único SuperAdministrador en toda la plataforma.');
+    const check = canModifyTargetUser(currentUser, targetUser, newRole);
+    if (!check.allowed) {
+      showAlarmFeedback(check.reason || 'Acción denegada.', 'error');
       return;
     }
 
@@ -1207,12 +1201,12 @@ export default function App() {
       )
     );
 
-    if (currentUser && currentUser.id === userId) {
-      setCurrentUser((prev) => prev ? ({
+    if (currentUser.id === userId) {
+      setCurrentUser((prev) => ({
         ...prev,
         role: newRole,
         roleLabel: roleLabels[newRole],
-      }) : null);
+      }));
     }
 
     updateUserInRTDB(
@@ -1231,16 +1225,12 @@ export default function App() {
   }, [currentUser, usersList, showAlarmFeedback]);
 
   const handleToggleUserStatus = useCallback((userId: string) => {
-    if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-      return;
-    }
-
     const targetUser = usersList.find(u => u.id === userId);
     if (!targetUser) return;
 
-    // Protección: Un admin no puede desactivar ni quitar acceso al único SuperAdmin
-    if (targetUser.role === 'superadmin') {
-      console.warn('Acción bloqueada: No se puede desactivar la cuenta del único SuperAdministrador.');
+    const check = canModifyTargetUser(currentUser, targetUser);
+    if (!check.allowed) {
+      showAlarmFeedback(check.reason || 'Acción denegada.', 'error');
       return;
     }
 
@@ -1270,17 +1260,20 @@ export default function App() {
 
   const handleLogin = useCallback((user: UserProfile) => {
     setCurrentUser(user);
+    onSessionUserUpdated?.(user);
     setShowLoginModal(false);
-  }, []);
+  }, [onSessionUserUpdated]);
 
   const handleLogout = useCallback(async () => {
-    await logoutFromFirebaseAuth().catch(() => {});
-    try {
-      localStorage.removeItem('minesafe_active_user');
-    } catch { /* ignore */ }
-    setCurrentUser(null);
+    soundAlert.stopContinuousAlarm();
     setShowLoginModal(false);
-  }, []);
+    setShowEmergencyModal(false);
+    setAlerts([]);
+    setAlertEvents([]);
+    setTelemetryHistory([]);
+    setUsersList([]);
+    await onLogoutRequest();
+  }, [onLogoutRequest]);
 
   const scopedSites = useMemo(
     () => sites.filter((s) => matchesOrg(s.organizationId)),
@@ -1291,8 +1284,8 @@ export default function App() {
     [scopedSites, currentSite]
   );
   const scopedUsers = useMemo(
-    () => usersList.filter((u) => effectiveOrgId === 'all' || u.role === 'superadmin' || matchesOrg(u.organizationId)),
-    [usersList, effectiveOrgId, matchesOrg]
+    () => filterScopedUsers(usersList, currentUser, effectiveOrgId),
+    [usersList, currentUser, effectiveOrgId]
   );
   const scopedRentals = useMemo(
     () => rentals.filter((r) => matchesOrg(r.organizationId)),
@@ -1360,34 +1353,6 @@ export default function App() {
     }
     setCurrentTab(tab);
   }, [currentUser, platformConfig]);
-
-  // Wait for Firebase Authentication initialization before rendering gate or dashboard
-  if (isAuthChecking) {
-    return (
-      <div className="min-h-screen w-full bg-slate-950 flex flex-col items-center justify-center p-6 text-slate-300">
-        <div className="w-10 h-10 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin mb-4" />
-        <p className="text-sm font-semibold text-white">Verificando sesión en Firebase Authentication...</p>
-        <p className="text-xs text-slate-400 mt-1">MineSafe IoT · Control de Acceso Seguro</p>
-      </div>
-    );
-  }
-
-  // GATEKEEPER: Require real Firebase Auth login before entering the application
-  if (!currentUser) {
-    return (
-      <LoginModal
-        isGateMode={true}
-        currentUser={null}
-        onLogin={handleLogin}
-        onLogout={handleLogout}
-        onClose={() => {}}
-        usersList={usersList}
-        onRegisterUser={handleAddUser}
-        theme={theme}
-        onToggleTheme={handleToggleTheme}
-      />
-    );
-  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-white">
@@ -1704,15 +1669,13 @@ export default function App() {
 
       </main>
 
-      {/* Login & Role Switcher Modal */}
+      {/* Account Switcher / Session Modal */}
       {showLoginModal && (
         <LoginModal
           currentUser={currentUser}
           onLogin={handleLogin}
           onLogout={handleLogout}
           onClose={() => setShowLoginModal(false)}
-          usersList={usersList}
-          onRegisterUser={handleAddUser}
           theme={theme}
           onToggleTheme={handleToggleTheme}
         />

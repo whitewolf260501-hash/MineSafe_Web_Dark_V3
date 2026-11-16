@@ -66,6 +66,10 @@ import {
   AlertAttachment,
   WorkerAssignment
 } from '../types';
+import {
+  canProvisionUserInOrganization,
+  DEFAULT_ORGANIZATION_ID,
+} from '../utils/accessControl';
 
 export const USER_RTDB_URL = "https://minefase-fc5f5-default-rtdb.firebaseio.com/";
 
@@ -313,20 +317,26 @@ function mapFirebaseAuthError(err: any): FirebaseAuthActionError {
       return new FirebaseAuthActionError('La contraseña debe tener al menos 6 caracteres.', code);
     case 'auth/operation-not-allowed':
       return new FirebaseAuthActionError(
-        `El proveedor "Correo electrónico/contraseña" está desactivado en Firebase Console (proyecto ${FIREBASE_PROJECT_ID}). Actívalo en Authentication → Sign-in method para poder crear cuentas con correo y clave.`,
+        'El método de inicio de sesión con correo y contraseña no está habilitado en el proveedor de autenticación.',
+        code
+      );
+    case 'auth/public-registration-disabled':
+    case 'auth/unauthorized-profile':
+      return new FirebaseAuthActionError(
+        err?.message || 'El acceso requiere una cuenta habilitada por un responsable autorizado.',
         code
       );
     case 'auth/unauthorized-domain':
       return new FirebaseAuthActionError(
-        `El dominio actual (${typeof window !== 'undefined' ? window.location.hostname : 'actual'}) no está autorizado en Firebase Console (${FIREBASE_PROJECT_ID} → Authentication → Settings → Dominios autorizados).`,
+        'Este dominio no está autorizado para iniciar sesión en el proveedor de autenticación.',
         code
       );
     case 'auth/popup-closed-by-user':
-      return new FirebaseAuthActionError('Se cerró la ventana emergente de Google antes de completar el acceso.', code);
+      return new FirebaseAuthActionError('Se cerró la ventana emergente antes de completar el acceso.', code);
     case 'auth/popup-blocked':
-      return new FirebaseAuthActionError('El navegador bloqueó la ventana emergente de Google. Permite ventanas emergentes e intenta nuevamente.', code);
+      return new FirebaseAuthActionError('El navegador bloqueó la ventana emergente de acceso. Permite ventanas emergentes e intenta nuevamente.', code);
     case 'auth/network-request-failed':
-      return new FirebaseAuthActionError('Error de red al conectar con Firebase Authentication. Verifica tu conexión a Internet.', code);
+      return new FirebaseAuthActionError('Error de red al conectar con el servicio de autenticación. Verifica tu conexión a Internet.', code);
     default:
       return new FirebaseAuthActionError(err?.message || 'Error al autenticar con Firebase Authentication.', code || 'auth/unknown');
   }
@@ -383,16 +393,16 @@ export async function resolveUserProfileFromAuthUser(fbUser: FirebaseUser): Prom
     if (byUidSnap.exists()) {
       const profile = mapRTDBUserToUserProfile(fbUser.uid, byUidSnap.val());
       if (profile.status === 'inactivo') {
-        await signOut(auth);
-        throw new Error('Tu cuenta se encuentra desactivada por administración.');
+        await signOut(auth).catch(() => {});
+        throw new FirebaseAuthActionError('Tu cuenta se encuentra desactivada por administración.', 'auth/user-disabled');
       }
       return profile;
     }
   } catch (err: any) {
-    if (err?.message?.includes('desactivada')) throw err;
+    if (err?.code === 'auth/user-disabled' || err?.message?.includes('desactivada')) throw err;
   }
 
-  // 2. Buscar por email en /usuarios y /precarga/usuarios_contratos
+  // 2. Buscar por email en /usuarios
   try {
     const allUsersSnap = await get(ref(rtdb, 'usuarios'));
     if (allUsersSnap.exists()) {
@@ -403,31 +413,40 @@ export async function resolveUserProfileFromAuthUser(fbUser: FirebaseUser): Prom
       if (matchedKey) {
         const profile = mapRTDBUserToUserProfile(matchedKey, allUsers[matchedKey]);
         if (profile.status === 'inactivo') {
-          await signOut(auth);
-          throw new Error('Tu cuenta se encuentra desactivada por administración.');
+          await signOut(auth).catch(() => {});
+          throw new FirebaseAuthActionError('Tu cuenta se encuentra desactivada por administración.', 'auth/user-disabled');
         }
         return profile;
       }
     }
   } catch (err: any) {
-    if (err?.message?.includes('desactivada')) throw err;
+    if (err?.code === 'auth/user-disabled' || err?.message?.includes('desactivada')) throw err;
   }
 
-  // 3. Fallback si fue creado directamente en Firebase Auth Console sin nodo previo en RTDB
-  const isCanonicalSuper = emailLower === PRIMARY_SUPERADMIN_EMAIL;
-  return {
-    id: isCanonicalSuper ? PRIMARY_SUPERADMIN_UID : fbUser.uid,
-    name: fbUser.displayName || (isCanonicalSuper ? 'Manuel Crisostomo' : (emailLower.split('@')[0] || 'Operador')),
-    email: fbUser.email || '',
-    role: isCanonicalSuper ? 'superadmin' : 'operador',
-    roleLabel: isCanonicalSuper ? 'Super Administrador de Seguridad Minera' : 'Usuario Normal / Operador de Faena',
-    rut: 'No registrado',
-    shift: 'Turno Continuo A',
-    status: 'activo',
-    lastLogin: 'En línea (Firebase Auth)',
-    assignedSector: 'Mina Chuquicamata',
-    assignedDeviceCode: isCanonicalSuper ? 'device_38A839E81F84' : '',
-  };
+  // 3. Únicamente el SuperAdministrador canónico tiene respaldo automático; cualquier otra cuenta
+  // debe contar con perfil autorizado y activo en /usuarios.
+  if (emailLower === PRIMARY_SUPERADMIN_EMAIL) {
+    return {
+      id: PRIMARY_SUPERADMIN_UID,
+      organizationId: DEFAULT_ORGANIZATION.id,
+      name: fbUser.displayName || 'Manuel Crisostomo',
+      email: fbUser.email || PRIMARY_SUPERADMIN_EMAIL,
+      role: 'superadmin',
+      roleLabel: 'Super Administrador de Seguridad Minera',
+      rut: 'No registrado',
+      shift: 'Turno Continuo A',
+      status: 'activo',
+      lastLogin: 'En línea (Firebase Auth)',
+      assignedSector: 'Mina Chuquicamata',
+      assignedDeviceCode: 'device_38A839E81F84',
+    };
+  }
+
+  await signOut(auth).catch(() => {});
+  throw new FirebaseAuthActionError(
+    'Tu cuenta no se encuentra habilitada o asociada a una organización autorizada. Solicita el alta a un responsable.',
+    'auth/unauthorized-profile'
+  );
 }
 
 export async function loginWithFirebaseAuth(
@@ -455,90 +474,24 @@ export async function loginWithGoogleFirebaseAuth(rememberMe: boolean = true): P
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
     const credential = await signInWithPopup(auth, provider);
-    const fbUser = credential.user;
-
-    // Registrar ficha básica en RTDB si es la primera vez que ingresa por Google (solo si no es el SuperAdmin canónico con nodo manual_temp_uid_01)
-    const byUidSnap = await get(ref(rtdb, `usuarios/${fbUser.uid}`)).catch(() => null);
-    const isCanonicalSuper = (fbUser.email || '').trim().toLowerCase() === PRIMARY_SUPERADMIN_EMAIL;
-    if ((!byUidSnap || !byUidSnap.exists()) && !isCanonicalSuper) {
-      await set(ref(rtdb, `usuarios/${fbUser.uid}`), {
-        nombre: fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0] : 'Usuario'),
-        email: fbUser.email || '',
-        isAdmin: false,
-        isSuperUser: false,
-        tipoUsuario: 'operador',
-        isActive: true,
-        telefono: 'No registrado',
-        cargo: 'Turno Continuo A',
-        geoMina: 'Faena Minera Central',
-        deviceId: '',
-        updatedAt: new Date().toISOString(),
-      }).catch(() => {});
-    }
-
-    return await resolveUserProfileFromAuthUser(fbUser);
+    // No auto-registra cuentas nuevas: exige perfil autorizado previo en /usuarios
+    return await resolveUserProfileFromAuthUser(credential.user);
   } catch (err: any) {
     throw mapFirebaseAuthError(err);
   }
 }
 
 export async function registerWithFirebaseAuth(
-  name: string,
-  email: string,
-  password: string,
-  rut: string,
-  shift: string
+  _name: string,
+  _email: string,
+  _password: string,
+  _rut: string,
+  _shift: string
 ): Promise<UserProfile> {
-  const cleanEmail = email.trim();
-  const cleanName = name.trim();
-  if (!cleanName || !cleanEmail || !password) {
-    throw new FirebaseAuthActionError('Nombre, correo y contraseña (mínimo 6 caracteres) son obligatorios.', 'auth/invalid-input');
-  }
-
-  try {
-    const credential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
-    await updateProfile(credential.user, { displayName: cleanName }).catch(() => {});
-    const uid = credential.user.uid;
-    const isCanonicalSuper = cleanEmail.toLowerCase() === PRIMARY_SUPERADMIN_EMAIL;
-    const safeRole: UserRole = isCanonicalSuper ? 'superadmin' : 'operador';
-
-    const newUser: UserProfile = {
-      id: isCanonicalSuper ? PRIMARY_SUPERADMIN_UID : uid,
-      name: cleanName,
-      email: cleanEmail,
-      role: safeRole,
-      roleLabel: isCanonicalSuper
-        ? 'Super Administrador de Seguridad Minera'
-        : 'Usuario Normal / Operador de Faena',
-      rut: rut.trim() || 'No registrado',
-      shift: shift.trim() || 'Turno Mañana',
-      status: 'activo',
-      lastLogin: 'En línea (Firebase Auth)',
-      assignedSector: 'Faena Minera Central',
-      assignedDeviceCode: isCanonicalSuper ? 'device_38A839E81F84' : '',
-    };
-
-    if (!isCanonicalSuper) {
-      await set(ref(rtdb, `usuarios/${uid}`), {
-        nombre: newUser.name,
-        email: newUser.email,
-        organizationId: DEFAULT_ORGANIZATION.id,
-        isAdmin: false,
-        isSuperUser: false,
-        tipoUsuario: 'operador',
-        isActive: true,
-        telefono: newUser.rut,
-        cargo: newUser.shift,
-        geoMina: newUser.assignedSector,
-        deviceId: '',
-        updatedAt: new Date().toISOString(),
-      }).catch(() => {});
-    }
-
-    return newUser;
-  } catch (err: any) {
-    throw mapFirebaseAuthError(err);
-  }
+  throw new FirebaseAuthActionError(
+    'El autorregistro público está deshabilitado. Las cuentas deben ser habilitadas por un responsable autorizado de la organización.',
+    'auth/public-registration-disabled'
+  );
 }
 
 /**
@@ -557,11 +510,25 @@ export async function createUserAccountByAdmin(params: {
   assignedDeviceCode?: string;
   organizationId?: string;
   sendResetEmail?: boolean;
+  actingUser?: UserProfile | null;
 }): Promise<UserProfile> {
   const cleanEmail = params.email.trim();
   const cleanName = params.name.trim();
   if (!cleanName || !cleanEmail || params.password.length < 6) {
     throw new Error('Nombre, correo válido y contraseña inicial (mínimo 6 caracteres) son obligatorios.');
+  }
+
+  const safeRole: UserRole = params.role === 'admin' ? 'admin' : 'operador';
+  const targetOrgId =
+    params.actingUser?.role === 'admin'
+      ? params.actingUser.organizationId || DEFAULT_ORGANIZATION_ID
+      : params.organizationId || DEFAULT_ORGANIZATION.id;
+
+  if (params.actingUser) {
+    const check = canProvisionUserInOrganization(params.actingUser, targetOrgId, safeRole);
+    if (!check.allowed) {
+      throw new Error(check.reason || 'Permisos insuficientes para crear cuentas.');
+    }
   }
 
   const secondaryApp =
@@ -578,10 +545,9 @@ export async function createUserAccountByAdmin(params: {
     }
     await signOut(secondaryAuth).catch(() => {});
 
-    const safeRole: UserRole = params.role === 'admin' ? 'admin' : 'operador';
     const createdProfile: UserProfile = {
       id: newUid,
-      organizationId: params.organizationId || DEFAULT_ORGANIZATION.id,
+      organizationId: targetOrgId,
       name: cleanName,
       email: cleanEmail,
       role: safeRole,
@@ -592,12 +558,12 @@ export async function createUserAccountByAdmin(params: {
       rut: params.rut.trim() || 'No registrado',
       shift: params.shift.trim() || 'Turno Continuo A',
       status: 'activo',
-      lastLogin: 'Cuenta creada en Firebase Auth',
+      lastLogin: 'Cuenta creada por administración',
       assignedSector: params.assignedSector || 'Faena Minera Central',
       assignedDeviceCode: params.assignedDeviceCode || '',
     };
 
-    await addUserToRTDB(createdProfile);
+    await addUserToRTDB(createdProfile, params.actingUser);
     return createdProfile;
   } catch (err: any) {
     await signOut(secondaryAuth).catch(() => {});
@@ -621,17 +587,19 @@ export async function logoutFromFirebaseAuth(): Promise<void> {
   await signOut(auth);
 }
 
-export function subscribeToFirebaseAuth(callback: (user: UserProfile | null) => void): () => void {
+export function subscribeToFirebaseAuth(
+  callback: (user: UserProfile | null, authError?: string | null) => void
+): () => void {
   return onAuthStateChanged(auth, async (fbUser) => {
     if (!fbUser) {
-      callback(null);
+      callback(null, null);
       return;
     }
     try {
       const profile = await resolveUserProfileFromAuthUser(fbUser);
-      callback(profile);
-    } catch {
-      callback(null);
+      callback(profile, null);
+    } catch (err: any) {
+      callback(null, err?.message || 'Tu cuenta no está habilitada para acceder al panel.');
     }
   });
 }
@@ -954,19 +922,31 @@ export function subscribeToRTDBUsers(callback: (users: UserProfile[]) => void): 
     callback(normalizedList);
   };
 
-  const unsub1 = onValue(usersRef, (snapshot) => {
-    if (snapshot.exists()) {
-      directUsers = snapshot.val() || {};
-      emitCombined();
+  const unsub1 = onValue(
+    usersRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        directUsers = snapshot.val() || {};
+        emitCombined();
+      }
+    },
+    (err) => {
+      console.warn('Acceso restringido o error leyendo /usuarios en RTDB:', err?.message || err);
     }
-  });
+  );
 
-  const unsub2 = onValue(precargaRef, (snapshot) => {
-    if (snapshot.exists()) {
-      precargaUsers = snapshot.val() || {};
-      emitCombined();
+  const unsub2 = onValue(
+    precargaRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        precargaUsers = snapshot.val() || {};
+        emitCombined();
+      }
+    },
+    () => {
+      // Precarga es opcional y puede estar restringida por reglas
     }
-  });
+  );
 
   return () => {
     unsub1();
@@ -1067,7 +1047,10 @@ export async function updateDeviceInRTDB(
   }
 }
 
-export async function addUserToRTDB(user: UserProfile): Promise<void> {
+export async function addUserToRTDB(
+  user: UserProfile,
+  actingUser?: UserProfile | null
+): Promise<void> {
   try {
     // Regla de plataforma: Solo existe un único SuperAdmin; nuevos usuarios nunca pueden crearse como superadmin
     const isCanonicalSuper =
@@ -1075,11 +1058,23 @@ export async function addUserToRTDB(user: UserProfile): Promise<void> {
     const safeRole: UserRole =
       user.role === 'superadmin' && !isCanonicalSuper ? 'admin' : user.role;
 
+    const targetOrgId =
+      actingUser?.role === 'admin'
+        ? actingUser.organizationId || DEFAULT_ORGANIZATION_ID
+        : user.organizationId || DEFAULT_ORGANIZATION.id;
+
+    if (actingUser) {
+      const check = canProvisionUserInOrganization(actingUser, targetOrgId, safeRole);
+      if (!check.allowed) {
+        throw new Error(check.reason || 'Permisos insuficientes para crear el usuario.');
+      }
+    }
+
     const userRef = ref(rtdb, `usuarios/${user.id}`);
     await set(userRef, {
       nombre: user.name,
       email: user.email,
-      organizationId: user.organizationId || DEFAULT_ORGANIZATION.id,
+      organizationId: targetOrgId,
       isAdmin: safeRole === 'superadmin' || safeRole === 'admin',
       isSuperUser: safeRole === 'superadmin',
       tipoUsuario: safeRole,
@@ -1127,12 +1122,26 @@ export async function updateUserInRTDB(
     throw new Error('Acción denegada: Solo puede existir un único SuperAdministrador en toda la plataforma.');
   }
 
+  // Aislamiento de organización: un Administrador no puede modificar usuarios de otra organización
+  if (actingUser && actingUser.role === 'admin') {
+    const actorOrg = actingUser.organizationId || DEFAULT_ORGANIZATION_ID;
+    const targetOrg = existingData?.organizationId || DEFAULT_ORGANIZATION_ID;
+    if (actorOrg !== targetOrg) {
+      throw new Error('Acción denegada: No puedes modificar usuarios de otra organización.');
+    }
+    if (updates.organizationId && updates.organizationId !== actorOrg) {
+      throw new Error('Acción denegada: Un Administrador no puede reasignar usuarios a otra organización.');
+    }
+  }
+
   const rtdbUpdates: any = {
     updatedAt: new Date().toISOString(),
   };
   if (updates.name) rtdbUpdates.nombre = updates.name;
   if (updates.email) rtdbUpdates.email = updates.email;
-  if (updates.organizationId) rtdbUpdates.organizationId = updates.organizationId;
+  if (updates.organizationId && actingUser?.role === 'superadmin') {
+    rtdbUpdates.organizationId = updates.organizationId;
+  }
   if (updates.rut) rtdbUpdates.codigoId = updates.rut;
   if (updates.role) {
     rtdbUpdates.tipoUsuario = updates.role;

@@ -25,6 +25,11 @@ import {
   sendPasswordResetWithFirebase,
   DEFAULT_ORGANIZATION,
 } from '../services/firebase';
+import {
+  canModifyTargetUser,
+  canProvisionUserInOrganization,
+  DEFAULT_ORGANIZATION_ID,
+} from '../utils/accessControl';
 
 interface UsersManagementViewProps {
   currentUser: UserProfile;
@@ -83,14 +88,10 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
   });
 
   const handleRoleSelectChange = (targetUser: UserProfile, nextRole: UserRole) => {
-    if (targetUser.role === 'superadmin') {
+    const check = canModifyTargetUser(currentUser, targetUser, nextRole);
+    if (!check.allowed) {
       soundAlert.playFeedbackBeep();
-      showToast('error', 'Acción bloqueada: Un Administrador no puede quitarle permisos al único SuperAdministrador.');
-      return;
-    }
-    if (nextRole === 'superadmin') {
-      soundAlert.playFeedbackBeep();
-      showToast('error', 'Acción bloqueada: Solo existe un único SuperAdministrador en toda la plataforma.');
+      showToast('error', check.reason || 'Acción denegada.');
       return;
     }
 
@@ -104,9 +105,10 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
   };
 
   const handleStatusToggleClick = (targetUser: UserProfile) => {
-    if (targetUser.role === 'superadmin') {
+    const check = canModifyTargetUser(currentUser, targetUser);
+    if (!check.allowed) {
       soundAlert.playFeedbackBeep();
-      showToast('error', 'Acción bloqueada: El único SuperAdministrador no puede ser desactivado.');
+      showToast('error', check.reason || 'Acción denegada.');
       return;
     }
     onToggleUserStatus(targetUser.id);
@@ -131,13 +133,20 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
     setCreateError(null);
     if (!newName.trim() || !newEmail.trim()) return;
 
-    // Garantizar que nunca se cree un segundo superadmin
+    // Garantizar que nunca se cree un segundo superadmin y respetar el ámbito de organización
     const safeRole: 'admin' | 'operador' = newRole === 'admin' ? 'admin' : 'operador';
-    const targetOrgId =
-      newOrganizationId ||
-      (activeOrganizationId && activeOrganizationId !== 'all'
-        ? activeOrganizationId
-        : DEFAULT_ORGANIZATION.id);
+    const targetOrgId = isSuperAdmin
+      ? newOrganizationId ||
+        (activeOrganizationId && activeOrganizationId !== 'all'
+          ? activeOrganizationId
+          : DEFAULT_ORGANIZATION.id)
+      : currentUser.organizationId || DEFAULT_ORGANIZATION_ID;
+
+    const provisionCheck = canProvisionUserInOrganization(currentUser, targetOrgId, safeRole);
+    if (!provisionCheck.allowed) {
+      setCreateError(provisionCheck.reason || 'Permisos insuficientes para crear el usuario.');
+      return;
+    }
 
     if (createRealAuth) {
       if (newPassword.length < 6) {
@@ -156,6 +165,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
           assignedSector: 'Faena Minera Central',
           organizationId: targetOrgId,
           sendResetEmail,
+          actingUser: currentUser,
         });
         soundAlert.playFeedbackBeep();
         showToast(
@@ -253,9 +263,11 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
               onClick={() => {
                 setCreateError(null);
                 setNewOrganizationId(
-                  activeOrganizationId && activeOrganizationId !== 'all'
-                    ? activeOrganizationId
-                    : DEFAULT_ORGANIZATION.id
+                  isSuperAdmin
+                    ? activeOrganizationId && activeOrganizationId !== 'all'
+                      ? activeOrganizationId
+                      : DEFAULT_ORGANIZATION.id
+                    : currentUser.organizationId || DEFAULT_ORGANIZATION_ID
                 );
                 setShowAddModal(true);
               }}
@@ -375,7 +387,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
               {filteredUsers.map((user) => {
                 const isTargetSuperAdmin = user.role === 'superadmin';
                 const isCurrentSession = user.id === currentUser.id;
-                const canModifyTarget = isAdminOrSuper && !isCurrentSession && !isTargetSuperAdmin;
+                const canModifyTarget = canModifyTargetUser(currentUser, user).allowed;
 
                 return (
                   <tr key={user.id} className="hover:bg-slate-800/40 transition-colors">
@@ -546,17 +558,26 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
               {organizations.length > 0 && (
                 <div>
                   <label className="text-slate-300 block mb-1">Organización / Empresa</label>
-                  <select
-                    value={newOrganizationId}
-                    onChange={(e) => setNewOrganizationId(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
-                  >
-                    {organizations.map((org) => (
-                      <option key={org.id} value={org.id}>
-                        {org.name} ({org.rut || org.id})
-                      </option>
-                    ))}
-                  </select>
+                  {isSuperAdmin ? (
+                    <select
+                      value={newOrganizationId}
+                      onChange={(e) => setNewOrganizationId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
+                    >
+                      {organizations.map((org) => (
+                        <option key={org.id} value={org.id}>
+                          {org.name} ({org.rut || org.id})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="w-full px-3 py-2 bg-slate-950/70 border border-slate-800 rounded-lg text-slate-300 font-medium">
+                      {organizations.find(
+                        (org) => org.id === (currentUser.organizationId || DEFAULT_ORGANIZATION_ID)
+                      )?.name || DEFAULT_ORGANIZATION.name}{' '}
+                      <span className="text-[10px] text-slate-500">(Organización asignada)</span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -597,7 +618,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
                   </div>
                 ) : (
                   <p className="text-[11px] text-amber-300">
-                    Modo solo perfil RTDB: el usuario no podrá iniciar sesión hasta completar su registro en Firebase Auth o usar Google Sign-In.
+                    Modo solo perfil RTDB: el usuario requerirá alta de credenciales en Firebase Authentication por parte del administrador antes de poder iniciar sesión.
                   </p>
                 )}
               </div>

@@ -3,9 +3,10 @@
     ".read": false,
     ".write": false,
     "dispositivos": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid).exists() && root.child('usuarios/' + auth.uid + '/isActive').val() !== false))",
       "$deviceId": {
-        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin' || auth.token.firebase.sign_in_provider === 'custom')",
+        ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (!data.child('organizationId').exists() || data.child('organizationId').val() === root.child('usuarios/' + auth.uid + '/organizationId').val())))",
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || auth.token.firebase.sign_in_provider === 'custom' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || ((root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin') && (!data.child('organizationId').exists() || data.child('organizationId').val() === root.child('usuarios/' + auth.uid + '/organizationId').val())))))",
         ".validate": "newData.hasChildren(['CO', 'PM2_5', 'temperatura', 'humedad'])",
         "CO": {
           ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4095"
@@ -25,112 +26,116 @@
       }
     },
     "usuarios": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin')))",
       "$userId": {
-        ".write": "auth != null && (auth.uid === $userId || auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || (root.child('usuarios/' + auth.uid + '/isAdmin').val() === true && data.child('isSuperUser').val() !== true && data.child('tipoUsuario').val() !== 'superadmin'))",
+        ".read": "auth != null && (auth.uid === $userId || auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || ((root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin') && (!data.child('organizationId').exists() || data.child('organizationId').val() === root.child('usuarios/' + auth.uid + '/organizationId').val())))))",
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || ((root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin') && data.child('isSuperUser').val() !== true && data.child('tipoUsuario').val() !== 'superadmin' && (!data.exists() || !data.child('organizationId').exists() || data.child('organizationId').val() === root.child('usuarios/' + auth.uid + '/organizationId').val()) && newData.child('organizationId').val() === root.child('usuarios/' + auth.uid + '/organizationId').val()))))",
         ".validate": "(!newData.child('isSuperUser').exists() || newData.child('isSuperUser').val() === false || auth.token.email === 'manuelcrisostomovega@gmail.com') && (newData.child('tipoUsuario').val() !== 'superadmin' || auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true)"
       }
     },
     "organizaciones": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
       "$orgId": {
-        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin')",
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin')))",
         ".validate": "newData.hasChildren(['id', 'name', 'status']) && newData.child('name').isString() && newData.child('name').val().length >= 2 && newData.child('name').val().length <= 160"
       }
     },
     "contratos": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
       "$contractId": {
-        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin' || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin')",
+        ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (!data.child('organizationId').exists() || data.child('organizationId').val() === root.child('usuarios/' + auth.uid + '/organizationId').val())))",
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || ((root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin') && (!newData.child('organizationId').exists() || newData.child('organizationId').val() === root.child('usuarios/' + auth.uid + '/organizationId').val())))))",
         ".validate": "newData.hasChildren(['contractNumber', 'deviceCode', 'provider'])"
       }
     },
     "pagos": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
       "$paymentId": {
-        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true)"
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true)))"
       }
     },
     "asignaciones": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
       "$assignmentId": {
-        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin' || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin')",
+        ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (!data.child('organizationId').exists() || data.child('organizationId').val() === root.child('usuarios/' + auth.uid + '/organizationId').val())))",
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || ((root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin') && (!newData.child('organizationId').exists() || newData.child('organizationId').val() === root.child('usuarios/' + auth.uid + '/organizationId').val())))))",
         ".validate": "newData.hasChildren(['workerName', 'crew', 'sectorName', 'assignedDeviceId'])"
       }
     },
     "alertas": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid).exists() && root.child('usuarios/' + auth.uid + '/isActive').val() !== false))",
       "$alertId": {
-        ".write": "auth != null",
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid).exists() && root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (!data.child('organizationId').exists() || data.child('organizationId').val() === root.child('usuarios/' + auth.uid + '/organizationId').val())))",
         ".validate": "newData.hasChildren(['title', 'severity'])"
       }
     },
     "bitacora_contingencias": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
       "$alertId": {
-        ".write": "auth != null",
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid).exists() && root.child('usuarios/' + auth.uid + '/isActive').val() !== false))",
         ".validate": "newData.hasChildren(['alertaId', 'titulo', 'estado'])"
       }
     },
     "adjuntos": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
       "$attachmentId": {
-        ".write": "auth != null",
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid).exists() && root.child('usuarios/' + auth.uid + '/isActive').val() !== false))",
         ".validate": "newData.hasChildren(['id', 'alertId', 'fileName', 'contentType', 'sizeBytes', 'downloadUrl']) && newData.child('sizeBytes').isNumber() && newData.child('sizeBytes').val() > 0 && newData.child('sizeBytes').val() <= 5242880"
       }
     },
     "simulacros_bitacora": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
       "$recordId": {
-        ".write": "auth != null"
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid).exists() && root.child('usuarios/' + auth.uid + '/isActive').val() !== false))"
       }
     },
     "simulacro": {
-      ".read": "auth != null",
-      ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin')"
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
+      ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin')))"
     },
     "emergencia": {
-      ".read": "auth != null",
-      ".write": "auth != null"
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
+      ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid).exists() && root.child('usuarios/' + auth.uid + '/isActive').val() !== false))"
     },
     "configuracion_alertas": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
       "$targetId": {
-        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin')",
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin')))",
         ".validate": "newData.hasChildren(['pm25', 'mq2', 'temperatura', 'humedad'])"
       }
     },
     "bitacora_configuracion_umbrales": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
       "$auditId": {
-        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin')"
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin')))"
       }
     },
     "eventos_umbrales": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
       "$eventId": {
-        ".write": "auth != null",
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid).exists() && root.child('usuarios/' + auth.uid + '/isActive').val() !== false))",
         ".validate": "newData.hasChildren(['dispositivo_id', 'variable', 'valor_detectado', 'umbral_superado', 'nivel'])"
       }
     },
     "historial_telemetria": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
       "$deviceId": {
         "$sampleTs": {
-          ".write": "auth != null",
+          ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid).exists() && root.child('usuarios/' + auth.uid + '/isActive').val() !== false))",
           ".validate": "newData.hasChildren(['timestamp'])"
         }
       }
     },
     "configuracion_plataforma": {
-      ".read": "auth != null",
-      ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin')",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
+      ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin')))",
       ".validate": "newData.hasChildren(['visibility', 'metrics', 'appearance'])"
     },
     "faenas": {
-      ".read": "auth != null",
+      ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isActive').val() !== false)",
       "$siteId": {
-        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin')"
+        ".read": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (!data.child('organizationId').exists() || data.child('organizationId').val() === root.child('usuarios/' + auth.uid + '/organizationId').val())))",
+        ".write": "auth != null && (auth.token.email === 'manuelcrisostomovega@gmail.com' || (root.child('usuarios/' + auth.uid + '/isActive').val() !== false && (root.child('usuarios/' + auth.uid + '/isSuperUser').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'superadmin' || ((root.child('usuarios/' + auth.uid + '/isAdmin').val() === true || root.child('usuarios/' + auth.uid + '/tipoUsuario').val() === 'admin') && (!newData.child('organizationId').exists() || newData.child('organizationId').val() === root.child('usuarios/' + auth.uid + '/organizationId').val())))))"
       }
     }
   }

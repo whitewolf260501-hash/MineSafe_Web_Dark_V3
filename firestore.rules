@@ -238,10 +238,7 @@ service cloud.firestore {
         incoming().id == userId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        (
-          (isOwner(userId) && incoming().role == 'operador' && incoming().status == 'activo') ||
-          isAdmin()
-        );
+        isAdmin();
       allow update: if isValidId(userId) &&
         isValidUser(incoming()) &&
         incoming().id == existing().id &&
